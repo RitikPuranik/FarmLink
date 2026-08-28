@@ -13,6 +13,7 @@ import { Input } from "@/components/ui/input";
 import { passwordSchema } from "@/features/auth/auth.schemas";
 import { authApi } from "@/services/authApi";
 import { ApiRequestError } from "@/types/api";
+import { FarmerProfileSection } from "@/components/farmer-profile/FarmerProfileSection";
 
 const changePasswordSchema = z.object({
   currentPassword: z.string().min(1, "validation.required"),
@@ -114,11 +115,27 @@ function ProfileContent() {
   const { user } = useAuth();
   if (!user) return null;
 
+  // Module 2 (build spec section 33): for FARMER accounts, /profile leads
+  // with the farmer/farm/crop/preferences profile — the content this page
+  // is named for — and keeps Module 1's account & security tools below it
+  // rather than replacing them. Every other role sees exactly what this
+  // page showed before Module 2 (unchanged).
   return (
     <main className="mx-auto max-w-2xl px-4 py-8">
-      <h1 className="mb-6 text-2xl font-semibold">Account & security</h1>
-      <ChangePasswordForm />
-      <SessionsCard />
+      {user.role === "FARMER" ? (
+        <>
+          <FarmerProfileSection />
+          <h2 className="mb-4 mt-10 text-xl font-semibold">Account & security</h2>
+          <ChangePasswordForm />
+          <SessionsCard />
+        </>
+      ) : (
+        <>
+          <h1 className="mb-6 text-2xl font-semibold">Account & security</h1>
+          <ChangePasswordForm />
+          <SessionsCard />
+        </>
+      )}
     </main>
   );
 }

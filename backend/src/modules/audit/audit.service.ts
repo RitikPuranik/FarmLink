@@ -13,7 +13,18 @@ export type AuditAction =
   | "ACCOUNT_REACTIVATED"
   | "ROLE_CHANGED"
   | "VERIFICATION_CHANGED"
-  | "AUTHORIZATION_DENIED";
+  | "AUTHORIZATION_DENIED"
+  // Module 2 — Farmer & Farm Profile Management
+  | "FARMER_PROFILE_CREATED"
+  | "FARMER_PROFILE_UPDATED"
+  | "FARM_CREATED"
+  | "FARM_UPDATED"
+  | "FARM_DELETED"
+  | "CROP_ADDED"
+  | "CROP_UPDATED"
+  | "CROP_REMOVED"
+  | "FPO_ASSOCIATED"
+  | "PREFERENCE_UPDATED";
 
 export interface AuditEvent {
   actorUserId?: string | null;

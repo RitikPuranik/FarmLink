@@ -1,7 +1,11 @@
 // FarmLink Intelligence — Module 1: Authentication & RBAC
-// Prisma schema. Designed to be extended by future modules (FarmerProfile,
-// FPOProfile, BuyerProfile, TransporterProfile, WarehouseProfile, etc.)
-// without touching the auth core.
+//           + Module 2: Farmer & Farm Profile Management
+// Prisma schema. Module 1 (User/Session/PasswordResetToken/OtpChallenge/
+// AuditLog) is untouched except for one additive back-relation on User
+// (`farmerProfile`) required by Prisma for the new 1:1 relation — no
+// existing Module 1 field, index, or behavior changes.
+// Designed to be extended by future modules (FPOProfile, BuyerProfile,
+// TransporterProfile, WarehouseProfile, etc.) without touching this core.
 
 generator client {
   provider = "prisma-client-js"
@@ -47,6 +51,47 @@ enum Language {
 }
 
 // ---------------------------------------------------------------------------
+// Module 2 enums
+// ---------------------------------------------------------------------------
+
+enum IrrigationType {
+  RAINFED
+  CANAL
+  BOREWELL
+  DRIP
+  SPRINKLER
+  MIXED
+  OTHER
+  NOT_SPECIFIED
+}
+
+enum AreaUnit {
+  ACRE
+  HECTARE
+}
+
+enum FpoMembershipStatus {
+  NOT_A_MEMBER
+  MEMBER
+  PENDING
+}
+
+enum LiquidityPreference {
+  URGENT
+  WITHIN_3_DAYS
+  WITHIN_1_WEEK
+  CAN_WAIT_2_WEEKS
+  FLEXIBLE
+}
+
+enum CommunicationPreference {
+  IN_APP
+  SMS
+  WHATSAPP
+  VOICE
+}
+
+// ---------------------------------------------------------------------------
 // Models
 // ---------------------------------------------------------------------------
 
@@ -76,6 +121,10 @@ model User {
   auditLogs           AuditLog[]
   passwordResetTokens PasswordResetToken[]
   otpChallenges       OtpChallenge[]
+
+  // Module 2. One-to-one; a FARMER gets at most one FarmerProfile. Every
+  // other Module 1 field/relation above this line is unchanged.
+  farmerProfile FarmerProfile?
 
   @@index([mobile])
   @@index([email])
@@ -164,4 +213,235 @@ model AuditLog {
   @@index([entityType, entityId])
   @@index([createdAt])
   @@map("audit_logs")
+}
+
+// ---------------------------------------------------------------------------
+// Module 2 — Farmer & Farm Profile Management
+//
+// Relationship shape (see build spec section 43):
+//
+//   User (Module 1, unchanged)
+//     └── FarmerProfile (1:1)
+//           ├── Farm[]        — a farmer may have multiple farms
+//           │     └── FarmerCrop[]
+//           └── Fpo (optional reference)
+//
+//   Crop
+//     ├── CropTranslation[]   — en/hi/mr display names, not duplicate crops
+//     └── FarmerCrop[]
+//
+//   State → District → Taluka — normalized location reference data,
+//   seeded for Maharashtra only for the current SIH scope but shaped so
+//   any other state can be added later without a schema change.
+//
+// Selling preferences (fpoMembershipStatus, liquidityPreference,
+// willingToStore, communicationPreference) live directly on FarmerProfile
+// rather than a separate FarmerPreferences table — they are 1:1 with the
+// farmer with no independent lifecycle of their own, so a second table
+// would only add a join every future module (Sell/Store, Market
+// Intelligence) would have to repeat for no benefit.
+//
+// profileCompletionPercentage is deliberately NOT a stored column. It is
+// computed on every read from the current farms/crops/preferences state
+// (see modules/farmers/completion.ts). Storing it would require every
+// farm/crop/preference mutation to remember to recompute and persist it;
+// computing on read makes staleness impossible by construction, which is
+// what the spec's "frontend must never send this as authoritative" rule
+// is ultimately protecting against.
+// ---------------------------------------------------------------------------
+
+model State {
+  id   String @id @default(uuid())
+  name String @unique
+
+  createdAt DateTime @default(now())
+
+  districts District[]
+  farms     Farm[]
+
+  @@map("states")
+}
+
+model District {
+  id      String @id @default(uuid())
+  stateId String
+  name    String
+
+  createdAt DateTime @default(now())
+
+  state   State    @relation(fields: [stateId], references: [id], onDelete: Cascade)
+  talukas Taluka[]
+  farms   Farm[]
+  fpos    Fpo[]
+
+  @@unique([stateId, name])
+  @@index([stateId])
+  @@map("districts")
+}
+
+model Taluka {
+  id         String @id @default(uuid())
+  districtId String
+  name       String
+
+  createdAt DateTime @default(now())
+
+  district District @relation(fields: [districtId], references: [id], onDelete: Cascade)
+  farms    Farm[]
+
+  @@unique([districtId, name])
+  @@index([districtId])
+  @@map("talukas")
+}
+
+// Minimal, reference-compatible FPO record (build spec section 21: "Only
+// create the relationship required for future integration" — full FPO
+// management, verification workflows, membership rosters, etc. are a
+// later module). A farmer's fpoId must point at a row here; the backend
+// verifies existence, the client can never supply an arbitrary FPO id and
+// have it accepted (see farmers.service.ts).
+model Fpo {
+  id         String  @id @default(uuid())
+  name       String
+  districtId String?
+  active     Boolean @default(true)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  district       District?       @relation(fields: [districtId], references: [id], onDelete: SetNull)
+  farmerProfiles FarmerProfile[]
+
+  @@index([districtId])
+  @@map("fpos")
+}
+
+model Crop {
+  id       String  @id @default(uuid())
+  // Canonical English name — the stable key other modules and the crop
+  // reference API key off. Localized display names live in
+  // CropTranslation, never as duplicate Crop rows per language.
+  name     String  @unique
+  category String?
+  active   Boolean @default(true)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  translations CropTranslation[]
+  farmerCrops  FarmerCrop[]
+
+  @@map("crops")
+}
+
+model CropTranslation {
+  id            String   @id @default(uuid())
+  cropId        String
+  language      Language
+  localizedName String
+
+  crop Crop @relation(fields: [cropId], references: [id], onDelete: Cascade)
+
+  @@unique([cropId, language])
+  @@index([cropId])
+  @@map("crop_translations")
+}
+
+model FarmerProfile {
+  id     String @id @default(uuid())
+  userId String @unique
+
+  // Null = the farmer has not yet answered this question (distinct from
+  // an explicit "No" / NOT_A_MEMBER), which is what lets the completion
+  // calculator and the "missing" list tell "unanswered" apart from
+  // "answered in the negative".
+  fpoMembershipStatus FpoMembershipStatus?
+  fpoId               String?
+
+  liquidityPreference      LiquidityPreference?
+  willingToStore           Boolean?
+  communicationPreference  CommunicationPreference @default(IN_APP)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  user        User         @relation(fields: [userId], references: [id], onDelete: Cascade)
+  fpo         Fpo?         @relation(fields: [fpoId], references: [id], onDelete: SetNull)
+  farms       Farm[]
+  farmerCrops FarmerCrop[]
+
+  @@index([userId])
+  @@index([fpoId])
+  @@map("farmer_profiles")
+}
+
+model Farm {
+  id              String  @id @default(uuid())
+  farmerProfileId String
+  name            String?
+
+  // Structured location (build spec section 6/13): village is free text,
+  // state/district/taluka are normalized FKs so future market-intel and
+  // logistics modules can query/aggregate by region reliably. Coordinates
+  // are optional and, per section 49, never exposed to buyers or PostHog
+  // by this module — only the owning farmer's own requests can read them.
+  village    String
+  pincode    String?
+  latitude   Float?
+  longitude  Float?
+  stateId    String
+  districtId String
+  talukaId   String
+
+  area           Float
+  areaUnit       AreaUnit
+  irrigationType IrrigationType @default(NOT_SPECIFIED)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  farmerProfile FarmerProfile @relation(fields: [farmerProfileId], references: [id], onDelete: Cascade)
+  state         State         @relation(fields: [stateId], references: [id])
+  district      District      @relation(fields: [districtId], references: [id])
+  taluka        Taluka        @relation(fields: [talukaId], references: [id])
+  farmerCrops   FarmerCrop[]
+
+  @@index([farmerProfileId])
+  @@index([stateId])
+  @@index([districtId])
+  @@index([talukaId])
+  @@map("farms")
+}
+
+model FarmerCrop {
+  id              String @id @default(uuid())
+  farmerProfileId String
+  farmId          String
+  cropId          String
+
+  area      Float
+  areaUnit  AreaUnit
+  isPrimary Boolean  @default(false)
+
+  // Optional for MVP (build spec section 18).
+  typicalYield Float?
+  yieldUnit    String?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  farmerProfile FarmerProfile @relation(fields: [farmerProfileId], references: [id], onDelete: Cascade)
+  farm          Farm          @relation(fields: [farmId], references: [id], onDelete: Cascade)
+  // Restrict, not Cascade: a crop reference row must never disappear
+  // silently out from under a farmer's records just because an admin
+  // deactivates/removes a crop from the catalog.
+  crop          Crop          @relation(fields: [cropId], references: [id], onDelete: Restrict)
+
+  // One farmer-crop row per (farm, crop) pair — "add Onion to this farm
+  // twice" is an edit of the existing row, not a new one (section 44).
+  @@unique([farmId, cropId])
+  @@index([farmerProfileId])
+  @@index([farmId])
+  @@index([cropId])
+  @@map("farmer_crops")
 }

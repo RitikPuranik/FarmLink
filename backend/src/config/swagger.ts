@@ -6,14 +6,15 @@ const options: swaggerJsdoc.Options = {
   definition: {
     openapi: "3.0.3",
     info: {
-      title: "FarmLink Intelligence API — Module 1: Authentication & RBAC",
-      version: "1.0.0",
+      title: "FarmLink Intelligence API — Modules 1 & 2",
+      version: "1.1.0",
       description:
         "SIH26132 — Strengthening market linkages and price discovery for farmers. " +
-        "This document covers Module 1 only: identity, authentication, session " +
-        "management, and role-based access control. All other business modules " +
-        "(farms, crops, market prices, buyers, logistics, etc.) build on top of " +
-        "the identity this module provides.",
+        "Module 1: identity, authentication, session management, and role-based " +
+        "access control. Module 2: farmer & farm profile management — farmer " +
+        "profiles, farms, crops, and location/crop/FPO reference data — built on " +
+        "top of the identity Module 1 issues. Later business modules (market " +
+        "prices, buyers, logistics, etc.) are not yet part of this API.",
     },
     servers: [{ url: env.BACKEND_URL, description: "Current environment" }],
     components: {

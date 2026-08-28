@@ -5,14 +5,30 @@ import { initSentry } from "./config/sentry";
 import { prisma } from "./config/prisma";
 import { PrismaAuthRepository } from "./modules/auth/auth.repository";
 import { PrismaAuditService } from "./modules/audit/audit.service";
+import { PrismaReferenceDataRepository } from "./modules/reference-data/reference-data.repository";
+import { PrismaFarmerProfileRepository } from "./modules/farmers/farmer-profile.repository";
+import { PrismaFarmsRepository } from "./modules/farms/farms.repository";
+import { PrismaFarmerCropRepository } from "./modules/crops/farmer-crop.repository";
 
 async function main() {
   initSentry();
 
   const authRepository = new PrismaAuthRepository(prisma);
   const auditService = new PrismaAuditService(prisma);
+  const referenceDataRepository = new PrismaReferenceDataRepository(prisma);
+  const farmerProfileRepository = new PrismaFarmerProfileRepository(prisma);
+  const farmsRepository = new PrismaFarmsRepository(prisma);
+  const farmerCropRepository = new PrismaFarmerCropRepository(prisma);
 
-  const app = createApp({ authRepository, auditService, prisma });
+  const app = createApp({
+    authRepository,
+    auditService,
+    prisma,
+    referenceDataRepository,
+    farmerProfileRepository,
+    farmsRepository,
+    farmerCropRepository,
+  });
 
   await prisma.$connect();
   logger.info("Database connection established");

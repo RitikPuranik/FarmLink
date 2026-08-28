@@ -12,10 +12,23 @@ const ALLOWED_EVENTS = new Set([
   "logout",
   "password_reset_started",
   "password_reset_completed",
+  // Module 2 — Farmer & Farm Profile Management (build spec section 40)
+  "profile_started",
+  "profile_completed",
+  "farm_created",
+  "farm_updated",
+  "crop_added",
+  "crop_removed",
+  "primary_crop_selected",
+  "fpo_selected",
+  "liquidity_preference_set",
+  "storage_preference_set",
 ]);
 
 // Defense in depth: even if a caller accidentally passes a sensitive key in
-// properties, it never leaves the process.
+// properties, it never leaves the process. Module 2 adds farm coordinates
+// and free-text address fields — build spec section 40/49 are explicit
+// that precise location must never reach analytics.
 const BLOCKED_PROPERTY_KEYS = new Set([
   "password",
   "otp",
@@ -25,6 +38,10 @@ const BLOCKED_PROPERTY_KEYS = new Set([
   "mobile",
   "email",
   "fullName",
+  "latitude",
+  "longitude",
+  "pincode",
+  "village",
 ]);
 
 export function trackEvent(
