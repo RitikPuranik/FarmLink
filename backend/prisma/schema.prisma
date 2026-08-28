@@ -1,0 +1,167 @@
+// FarmLink Intelligence — Module 1: Authentication & RBAC
+// Prisma schema. Designed to be extended by future modules (FarmerProfile,
+// FPOProfile, BuyerProfile, TransporterProfile, WarehouseProfile, etc.)
+// without touching the auth core.
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// ---------------------------------------------------------------------------
+// Enums
+// ---------------------------------------------------------------------------
+
+enum UserRole {
+  FARMER
+  FPO_ADMIN
+  BUYER
+  TRANSPORTER
+  WAREHOUSE_OPERATOR
+  ADMIN
+  GOVERNMENT_VIEWER
+}
+
+enum AccountStatus {
+  ACTIVE
+  PENDING_VERIFICATION
+  SUSPENDED
+  DEACTIVATED
+}
+
+enum VerificationStatus {
+  PENDING
+  VERIFIED
+  REJECTED
+  EXPIRED
+}
+
+enum Language {
+  en
+  hi
+  mr
+}
+
+// ---------------------------------------------------------------------------
+// Models
+// ---------------------------------------------------------------------------
+
+model User {
+  id       String @id @default(uuid())
+  publicId String @unique @default(uuid())
+
+  fullName     String
+  mobile       String  @unique
+  email        String? @unique
+  passwordHash String
+
+  role          UserRole
+  accountStatus AccountStatus @default(PENDING_VERIFICATION)
+
+  phoneVerificationStatus    VerificationStatus @default(PENDING)
+  emailVerificationStatus    VerificationStatus @default(PENDING)
+  identityVerificationStatus VerificationStatus @default(PENDING)
+
+  preferredLanguage Language @default(en)
+
+  lastLoginAt DateTime?
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+
+  sessions            Session[]
+  auditLogs           AuditLog[]
+  passwordResetTokens PasswordResetToken[]
+  otpChallenges       OtpChallenge[]
+
+  @@index([mobile])
+  @@index([email])
+  @@index([publicId])
+  @@index([role])
+  @@index([accountStatus])
+  @@index([createdAt])
+  @@map("users")
+}
+
+model Session {
+  id     String @id @default(uuid())
+  userId String
+
+  // Hash of the long-lived refresh token secret. Raw secret is never stored.
+  tokenHash String
+
+  createdAt  DateTime  @default(now())
+  expiresAt  DateTime
+  revokedAt  DateTime?
+  lastUsedAt DateTime?
+
+  userAgent String?
+  ipAddress String?
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@index([tokenHash])
+  @@map("sessions")
+}
+
+model PasswordResetToken {
+  id     String @id @default(uuid())
+  userId String
+
+  tokenHash String
+  expiresAt DateTime
+  usedAt    DateTime?
+  createdAt DateTime  @default(now())
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@map("password_reset_tokens")
+}
+
+// Future-ready OTP challenge storage. Backs the OtpProvider abstraction
+// (MockOtpProvider today, FutureSmsOtpProvider later) without committing to
+// a real SMS vendor yet.
+model OtpChallenge {
+  id     String  @id @default(uuid())
+  userId String?
+
+  destination String // mobile number or email the OTP was issued for
+  purpose     String // e.g. "PHONE_VERIFICATION", "LOGIN_2FA"
+  codeHash    String
+  expiresAt   DateTime
+  consumedAt  DateTime?
+  attempts    Int       @default(0)
+  createdAt   DateTime  @default(now())
+
+  user User? @relation(fields: [userId], references: [id], onDelete: SetNull)
+
+  @@index([userId])
+  @@index([destination, purpose])
+  @@map("otp_challenges")
+}
+
+model AuditLog {
+  id          String @id @default(uuid())
+  actorUserId String?
+
+  action     String
+  entityType String
+  entityId   String?
+  metadata   Json?
+
+  ipAddress String?
+  userAgent String?
+  createdAt DateTime @default(now())
+
+  actor User? @relation(fields: [actorUserId], references: [id], onDelete: SetNull)
+
+  @@index([actorUserId])
+  @@index([entityType, entityId])
+  @@index([createdAt])
+  @@map("audit_logs")
+}
