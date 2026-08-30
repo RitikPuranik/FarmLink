@@ -31,6 +31,15 @@ export interface UpdateFarmerCropData {
  */
 export interface FarmerCropRepository {
   findManyByFarmerProfileId(farmerProfileId: string): Promise<FarmerCropWithCrop[]>;
+  /**
+   * Batch lookup across many farmers at once — this is the core read used by
+   * Module 3's crop-aggregation engine (group every active member's crops by
+   * crop in one query instead of looping per farmer, build spec section 27/
+   * 32/59) and by the FPO member directory's "primary crop" column. Purely
+   * additive; every existing call site keeps using the singular method above
+   * unchanged.
+   */
+  findManyByFarmerProfileIds(farmerProfileIds: string[]): Promise<FarmerCropWithCrop[]>;
   findManyByFarmId(farmId: string): Promise<FarmerCrop[]>;
   findById(id: string): Promise<FarmerCropWithCrop | null>;
   findByFarmAndCrop(farmId: string, cropId: string): Promise<FarmerCrop | null>;
@@ -53,6 +62,15 @@ export class PrismaFarmerCropRepository implements FarmerCropRepository {
   findManyByFarmerProfileId(farmerProfileId: string) {
     return this.prisma.farmerCrop.findMany({
       where: { farmerProfileId },
+      orderBy: { createdAt: "asc" },
+      include: CROP_INCLUDE,
+    });
+  }
+
+  findManyByFarmerProfileIds(farmerProfileIds: string[]) {
+    if (farmerProfileIds.length === 0) return Promise.resolve([]);
+    return this.prisma.farmerCrop.findMany({
+      where: { farmerProfileId: { in: farmerProfileIds } },
       orderBy: { createdAt: "asc" },
       include: CROP_INCLUDE,
     });

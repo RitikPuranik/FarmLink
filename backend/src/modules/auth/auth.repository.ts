@@ -35,6 +35,13 @@ export interface AuthRepository {
   findUserByMobile(mobile: string): Promise<User | null>;
   findUserByEmail(email: string): Promise<User | null>;
   findUserById(id: string): Promise<User | null>;
+  /**
+   * Batch lookup — added for Module 3's FPO member directory (build spec
+   * section 25/59: "avoid N+1 queries" when joining membership rows back to
+   * the farmer's display name). Purely additive: every existing call site
+   * and test continues to use findUserById unchanged.
+   */
+  findManyByIds(ids: string[]): Promise<User[]>;
   createUser(data: CreateUserData): Promise<User>;
   updateUserPassword(userId: string, passwordHash: string): Promise<void>;
   updateLastLogin(userId: string): Promise<void>;
@@ -65,6 +72,11 @@ export class PrismaAuthRepository implements AuthRepository {
 
   findUserById(id: string) {
     return this.prisma.user.findUnique({ where: { id } });
+  }
+
+  findManyByIds(ids: string[]) {
+    if (ids.length === 0) return Promise.resolve([]);
+    return this.prisma.user.findMany({ where: { id: { in: ids } } });
   }
 
   createUser(data: CreateUserData) {

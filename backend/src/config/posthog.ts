@@ -23,6 +23,12 @@ const ALLOWED_EVENTS = new Set([
   "fpo_selected",
   "liquidity_preference_set",
   "storage_preference_set",
+  // Module 3 — FPO Management & Farmer Aggregation (build spec section 62)
+  "fpo_created",
+  "membership_requested",
+  "membership_approved",
+  "membership_rejected",
+  "aggregation_created",
 ]);
 
 // Defense in depth: even if a caller accidentally passes a sensitive key in

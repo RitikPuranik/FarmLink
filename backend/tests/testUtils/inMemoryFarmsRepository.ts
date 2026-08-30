@@ -39,6 +39,13 @@ export class InMemoryFarmsRepository implements FarmsRepository {
       .map((f) => this.withLocation(f)) as never;
   }
 
+  async findManyByFarmerProfileIds(farmerProfileIds: string[]) {
+    return this.farms
+      .filter((f) => farmerProfileIds.includes(f.farmerProfileId))
+      .sort((a, b) => a.createdAt.getTime() - b.createdAt.getTime())
+      .map((f) => this.withLocation(f)) as never;
+  }
+
   async findById(id: string) {
     const farm = this.farms.find((f) => f.id === id);
     return (farm ? this.withLocation(farm) : null) as never;

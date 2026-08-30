@@ -92,6 +92,83 @@ enum CommunicationPreference {
 }
 
 // ---------------------------------------------------------------------------
+// Module 3 enums — FPO Management & Farmer Aggregation
+// ---------------------------------------------------------------------------
+
+enum FpoOrganizationType {
+  FPO
+  FPC
+  COOPERATIVE
+  OTHER
+}
+
+// Deliberately its own enum rather than reusing Module 1's VerificationStatus
+// (User.phoneVerificationStatus etc.): that enum's PENDING/VERIFIED/REJECTED/
+// EXPIRED already carries a specific identity-verification meaning, and an
+// FPO's registration-review workflow needs an extra UNDER_REVIEW step plus a
+// SUSPENDED value the User verification concept has no equivalent for.
+// Coupling the two would make a future change to one silently affect the
+// other for no shared benefit.
+enum FpoVerificationStatus {
+  PENDING
+  UNDER_REVIEW
+  VERIFIED
+  REJECTED
+  SUSPENDED
+  EXPIRED
+}
+
+// Operational status of the FPO account itself (can it be used at all right
+// now), distinct from verificationStatus (has the org been vetted). A
+// SUSPENDED/DEACTIVATED FPO blocks normal member-management/aggregation
+// operations regardless of how "verified" it is on paper.
+enum FpoAccountStatus {
+  ACTIVE
+  SUSPENDED
+  DEACTIVATED
+}
+
+enum FpoAdminRole {
+  PRIMARY_ADMIN
+  ADMIN
+}
+
+enum FpoAdminStatus {
+  ACTIVE
+  INACTIVE
+}
+
+// Lifecycle of a single farmer's membership *request/record* at one FPO.
+// Named distinctly from the existing FpoMembershipStatus enum above (which
+// is Module 2's much simpler farmer-self-declared NOT_A_MEMBER/MEMBER/
+// PENDING answer on FarmerProfile) — the two are intentionally not merged;
+// see FarmerProfile's fpoMembershipStatus field comment and
+// modules/fpo/README for how they relate.
+enum MembershipStatus {
+  PENDING
+  ACTIVE
+  REJECTED
+  SUSPENDED
+  REMOVED
+}
+
+enum AggregationGroupStatus {
+  DRAFT
+  OPEN
+  READY
+  CLOSED
+  CANCELLED
+}
+
+// Internal normalization unit is KG (see modules/fpo/unit-conversion.ts);
+// this enum is what callers/API responses are allowed to request/display in.
+enum QuantityUnit {
+  KG
+  QTL
+  TONNE
+}
+
+// ---------------------------------------------------------------------------
 // Models
 // ---------------------------------------------------------------------------
 
@@ -125,6 +202,14 @@ model User {
   // Module 2. One-to-one; a FARMER gets at most one FarmerProfile. Every
   // other Module 1 field/relation above this line is unchanged.
   farmerProfile FarmerProfile?
+
+  // Module 3. A user with role FPO_ADMIN can administer zero or more FPOs
+  // (and in principle a non-FPO_ADMIN user could hold a legacy/former
+  // FpoAdmin row too — role alone is never trusted for authorization, see
+  // modules/fpo/fpo.authorization.ts) — kept as its own join model rather
+  // than a single fpoId on User because an admin may manage more than one
+  // FPO and an FPO may have more than one admin.
+  fpoAdminRoles FpoAdmin[]
 
   @@index([mobile])
   @@index([email])
@@ -258,6 +343,7 @@ model State {
 
   districts District[]
   farms     Farm[]
+  fpos      Fpo[]
 
   @@map("states")
 }
@@ -288,31 +374,77 @@ model Taluka {
 
   district District @relation(fields: [districtId], references: [id], onDelete: Cascade)
   farms    Farm[]
+  fpos     Fpo[]
 
   @@unique([districtId, name])
   @@index([districtId])
   @@map("talukas")
 }
 
-// Minimal, reference-compatible FPO record (build spec section 21: "Only
-// create the relationship required for future integration" — full FPO
-// management, verification workflows, membership rosters, etc. are a
-// later module). A farmer's fpoId must point at a row here; the backend
-// verifies existence, the client can never supply an arbitrary FPO id and
-// have it accepted (see farmers.service.ts).
+// Module 3 — FPO Management & Farmer Aggregation.
+//
+// Originally a minimal, reference-compatible stub added by Module 2 (build
+// spec section 21 there: "only create the relationship required for future
+// integration"). Module 3 extends this same model in place — rather than
+// creating a second FPO table — with full registration/verification/account
+// fields. `id`, `name`, `districtId` and `active` are untouched in meaning;
+// every Module 2 query that reads them (reference-data.repository.ts,
+// farmers.service.ts's assertFpoExists/getFpoById) keeps working unmodified.
 model Fpo {
-  id         String  @id @default(uuid())
-  name       String
-  districtId String?
-  active     Boolean @default(true)
+  id       String @id @default(uuid())
+  publicId String @unique @default(uuid())
+
+  name               String
+  legalName          String?
+  registrationNumber String?
+  organizationType   FpoOrganizationType @default(OTHER)
+
+  phone String?
+  email String?
+
+  village    String?
+  pincode    String?
+  latitude   Float?
+  longitude  Float?
+  stateId    String
+  districtId String
+  talukaId   String?
+
+  verificationStatus FpoVerificationStatus @default(PENDING)
+  accountStatus      FpoAccountStatus      @default(ACTIVE)
+
+  // Legacy Module 2 flag, kept for backward compatibility: Module 2's
+  // reference-data listing/selection queries (GET /api/reference/fpos,
+  // assertFpoExists, getFpoById) filter on this column directly and must
+  // keep working unmodified. Module 3 never writes to it directly — the FPO
+  // verification/suspension service methods keep it in sync with
+  // `accountStatus === ACTIVE` in the same update (see
+  // fpo-verification.service.ts) so both the old and new call sites agree
+  // on what "usable" means.
+  active Boolean @default(true)
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
-  district       District?       @relation(fields: [districtId], references: [id], onDelete: SetNull)
+  state    State    @relation(fields: [stateId], references: [id])
+  district District @relation(fields: [districtId], references: [id])
+  taluka   Taluka?  @relation(fields: [talukaId], references: [id])
+
+  // Module 2's self-declared farmer<->FPO answer (FarmerProfile.fpoId) —
+  // unchanged, see that field's own comment for why it is deliberately not
+  // merged into Module 3's `memberships` below.
   farmerProfiles FarmerProfile[]
 
+  // Module 3
+  admins            FpoAdmin[]
+  memberships       FpoMembership[]
+  aggregationGroups AggregationGroup[]
+
+  @@index([stateId])
   @@index([districtId])
+  @@index([talukaId])
+  @@index([verificationStatus])
+  @@index([accountStatus])
   @@map("fpos")
 }
 
@@ -328,8 +460,9 @@ model Crop {
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
-  translations CropTranslation[]
-  farmerCrops  FarmerCrop[]
+  translations      CropTranslation[]
+  farmerCrops       FarmerCrop[]
+  aggregationGroups AggregationGroup[]
 
   @@map("crops")
 }
@@ -355,6 +488,16 @@ model FarmerProfile {
   // an explicit "No" / NOT_A_MEMBER), which is what lets the completion
   // calculator and the "missing" list tell "unanswered" apart from
   // "answered in the negative".
+  //
+  // Module 3 note: this pair remains the farmer's own self-declared answer
+  // used only for onboarding/profile-completion (Module 2). It is NOT
+  // updated by the FpoMembership approval workflow below and can disagree
+  // with it (e.g. a farmer who ticks "MEMBER" here without ever going
+  // through FPO admin approval, or an admin-approved member who hasn't
+  // touched their profile form). `fpoMemberships` is the authoritative,
+  // audited record of admin-approved FPO membership; this pair is not
+  // migrated into it so existing profile-completion behavior/tests are
+  // left exactly as Module 2 built them (see build spec section 87).
   fpoMembershipStatus FpoMembershipStatus?
   fpoId               String?
 
@@ -369,6 +512,11 @@ model FarmerProfile {
   fpo         Fpo?         @relation(fields: [fpoId], references: [id], onDelete: SetNull)
   farms       Farm[]
   farmerCrops FarmerCrop[]
+
+  // Module 3 — admin-approved membership history/requests. See the
+  // fpoMembershipStatus/fpoId comment above for how this relates to the
+  // legacy self-declared fields.
+  fpoMemberships FpoMembership[]
 
   @@index([userId])
   @@index([fpoId])
@@ -444,4 +592,131 @@ model FarmerCrop {
   @@index([farmId])
   @@index([cropId])
   @@map("farmer_crops")
+}
+
+// ---------------------------------------------------------------------------
+// Module 3 — FPO Management & Farmer Aggregation
+//
+// Relationship shape (build spec section 4/101):
+//
+//   User -> FarmerProfile -> Farm -> FarmerCrop -> FpoMembership -> Fpo
+//                                                                     |
+//                                                    +----------------+----------------+
+//                                                    v                                 v
+//                                            Member management                  Aggregation
+//                                                                                     |
+//                                                                                     v
+//                                                                          AggregationGroup (planning
+//                                                                          object only — never a sale,
+//                                                                          order, contract, lot or
+//                                                                          shipment; see section 75)
+// ---------------------------------------------------------------------------
+
+// An authorization grant: "this user administers this FPO". FPO_ADMIN alone
+// (the User.role) never grants access to a specific FPO — every FPO-scoped
+// admin operation must find an ACTIVE row here for (userId, fpoId) first.
+// See modules/fpo/fpo.authorization.ts.
+model FpoAdmin {
+  id    String @id @default(uuid())
+  fpoId String
+  userId String
+
+  role   FpoAdminRole
+  status FpoAdminStatus @default(ACTIVE)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  fpo  Fpo  @relation(fields: [fpoId], references: [id], onDelete: Cascade)
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([fpoId, userId])
+  @@index([userId])
+  @@index([fpoId])
+  @@map("fpo_admins")
+}
+
+// A single farmer's membership request/record at one FPO. Historical rows
+// (REJECTED/REMOVED) are never deleted — see build spec section 19/93.
+//
+// Build spec section 14: a farmer may hold only one ACTIVE primary FPO
+// membership at a time. This is enforced server-side in
+// membership.service.ts (checked inside the same operation that creates/
+// approves a membership). PostgreSQL can additionally enforce it at the
+// database level with a *partial* unique index, which Prisma's schema DSL
+// cannot express declaratively:
+//
+//   CREATE UNIQUE INDEX fpo_memberships_one_active_per_farmer
+//     ON fpo_memberships (farmer_id)
+//     WHERE status = 'ACTIVE';
+//
+// Apply this by hand in a follow-up migration (`prisma migrate dev
+// --create-only`, then add the statement above) once a real database is
+// available — the plain @@index below only supports lookups, not the
+// uniqueness constraint.
+model FpoMembership {
+  id       String @id @default(uuid())
+  publicId String @unique @default(uuid())
+
+  fpoId    String
+  farmerId String
+
+  status MembershipStatus @default(PENDING)
+
+  requestedAt DateTime  @default(now())
+  joinedAt    DateTime?
+  approvedAt  DateTime?
+  rejectedAt  DateTime?
+  removedAt   DateTime?
+
+  // Optional admin-facing note captured on reject (build spec section 18).
+  // Never returned to the farmer as "internal notes" — only a plain
+  // rejection reason string is surfaced, see membership.types.ts.
+  rejectionReason String?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  fpo    Fpo           @relation(fields: [fpoId], references: [id], onDelete: Cascade)
+  farmer FarmerProfile @relation(fields: [farmerId], references: [id], onDelete: Cascade)
+
+  @@index([fpoId, status])
+  @@index([farmerId, status])
+  @@map("fpo_memberships")
+}
+
+// A planning target for one crop at one FPO (build spec section 34/75/94:
+// "not a sale, order, contract, lot, or shipment"). Future Module 4 will
+// hang actual Lot rows off this via aggregationGroupId; none of that exists
+// yet (section 40/96 — no fake lotId).
+model AggregationGroup {
+  id       String @id @default(uuid())
+  publicId String @unique @default(uuid())
+
+  fpoId  String
+  cropId String
+
+  targetQuantity    Float?
+  // Snapshot of the estimated member supply *at creation/last recompute
+  // time* — the live figure always comes from FpoAggregationService at read
+  // time (build spec section 73: data freshness); this column exists so a
+  // closed/cancelled group still shows what supply looked like when it was
+  // open, without depending on farmer data that may since have changed.
+  estimatedQuantity Float?
+  unit              QuantityUnit @default(QTL)
+
+  status AggregationGroupStatus @default(DRAFT)
+
+  targetDate DateTime?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  fpo  Fpo  @relation(fields: [fpoId], references: [id], onDelete: Cascade)
+  crop Crop @relation(fields: [cropId], references: [id], onDelete: Restrict)
+
+  @@index([fpoId, status])
+  @@index([cropId])
+  @@index([status])
+  @@map("aggregation_groups")
 }

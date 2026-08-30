@@ -31,6 +31,14 @@ export type UpdateFarmData = Partial<Omit<CreateFarmData, "farmerProfileId">>;
  */
 export interface FarmsRepository {
   findManyByFarmerProfileId(farmerProfileId: string): Promise<FarmWithLocation[]>;
+  /**
+   * Batch lookup across many farmers at once — added for Module 3's FPO
+   * member directory (village/district column), so listing N members costs
+   * one query instead of N (build spec section 25/59). Purely additive;
+   * findManyByFarmerProfileId above is unchanged and still used everywhere
+   * it always was.
+   */
+  findManyByFarmerProfileIds(farmerProfileIds: string[]): Promise<FarmWithLocation[]>;
   findById(id: string): Promise<FarmWithLocation | null>;
   create(data: CreateFarmData): Promise<FarmWithLocation>;
   update(id: string, data: UpdateFarmData): Promise<FarmWithLocation>;
@@ -44,6 +52,15 @@ export class PrismaFarmsRepository implements FarmsRepository {
   findManyByFarmerProfileId(farmerProfileId: string) {
     return this.prisma.farm.findMany({
       where: { farmerProfileId },
+      orderBy: { createdAt: "asc" },
+      include: LOCATION_INCLUDE,
+    });
+  }
+
+  findManyByFarmerProfileIds(farmerProfileIds: string[]) {
+    if (farmerProfileIds.length === 0) return Promise.resolve([]);
+    return this.prisma.farm.findMany({
+      where: { farmerProfileId: { in: farmerProfileIds } },
       orderBy: { createdAt: "asc" },
       include: LOCATION_INCLUDE,
     });

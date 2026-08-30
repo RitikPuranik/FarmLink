@@ -142,12 +142,13 @@ export class ReferenceDataService {
   }
 
   /**
-   * Validates that a state/district/taluka form a real, consistent chain
-   * (build spec section 46: "validate location IDs" + section 8: "validate
-   * on backend"). Used by the farms module when creating/updating a farm so
-   * a district can never be attached to the wrong state, etc.
+   * Validates that a district really belongs to a state (build spec
+   * section 46/58). Split out from assertValidLocationChain below so
+   * Module 3 (FPO registration, where taluka is optional — not every FPO
+   * maps neatly onto one taluka the way a single farm does) can reuse the
+   * state/district half without being forced to supply a talukaId.
    */
-  async assertValidLocationChain(input: { stateId: string; districtId: string; talukaId: string }) {
+  async assertValidStateDistrict(input: { stateId: string; districtId: string }) {
     const state = await this.repo.findStateById(input.stateId);
     if (!state) {
       throw new ValidationError("Please correct the highlighted fields", { stateId: "Unknown state." });
@@ -160,13 +161,33 @@ export class ReferenceDataService {
       });
     }
 
-    const taluka = await this.repo.findTalukaById(input.talukaId);
-    if (!taluka || taluka.districtId !== district.id) {
+    return { state, district };
+  }
+
+  /**
+   * Validates that a district belongs to a taluka's parent district (build
+   * spec section 46/58). Split out for the same reason as
+   * assertValidStateDistrict above.
+   */
+  async assertValidTalukaInDistrict(districtId: string, talukaId: string) {
+    const taluka = await this.repo.findTalukaById(talukaId);
+    if (!taluka || taluka.districtId !== districtId) {
       throw new ValidationError("Please correct the highlighted fields", {
         talukaId: "This taluka does not belong to the selected district.",
       });
     }
+    return taluka;
+  }
 
+  /**
+   * Validates that a state/district/taluka form a real, consistent chain
+   * (build spec section 46: "validate location IDs" + section 8: "validate
+   * on backend"). Used by the farms module when creating/updating a farm so
+   * a district can never be attached to the wrong state, etc.
+   */
+  async assertValidLocationChain(input: { stateId: string; districtId: string; talukaId: string }) {
+    const { state, district } = await this.assertValidStateDistrict(input);
+    const taluka = await this.assertValidTalukaInDistrict(district.id, input.talukaId);
     return { state, district, taluka };
   }
 }

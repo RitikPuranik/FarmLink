@@ -24,6 +24,22 @@ import { createFarmsRouter } from "./modules/farms/farms.routes";
 import { FarmerCropRepository } from "./modules/crops/farmer-crop.repository";
 import { CropsService } from "./modules/crops/crops.service";
 import { createCropsRouter } from "./modules/crops/crops.routes";
+import { FpoRepository } from "./modules/fpo/fpo.repository";
+import { FpoAdminRepository } from "./modules/fpo/fpo-admin.repository";
+import { FpoMembershipRepository } from "./modules/fpo/membership.repository";
+import { AggregationGroupRepository } from "./modules/fpo/aggregation.repository";
+import { FpoAuthorizationService } from "./modules/fpo/fpo.authorization";
+import { FpoService } from "./modules/fpo/fpo.service";
+import { FpoVerificationService } from "./modules/fpo/fpo-verification.service";
+import { FpoAdminService } from "./modules/fpo/fpo-admin.service";
+import { FpoMembershipService } from "./modules/fpo/membership.service";
+import { FpoAggregationService } from "./modules/fpo/aggregation.service";
+import { GovernmentFpoService } from "./modules/fpo/government-fpo.service";
+import { NoopFpoNotificationHooks } from "./modules/fpo/notifications";
+import { createFpoRouter } from "./modules/fpo/fpo.routes";
+import { createMembershipActionsRouter, createMyFpoRouter } from "./modules/fpo/membership.routes";
+import { createAdminFpoRouter } from "./modules/fpo/admin-fpo.routes";
+import { createGovernmentFpoRouter } from "./modules/fpo/government.routes";
 
 export interface AppDependencies {
   authRepository: AuthRepository;
@@ -37,6 +53,11 @@ export interface AppDependencies {
   farmerProfileRepository: FarmerProfileRepository;
   farmsRepository: FarmsRepository;
   farmerCropRepository: FarmerCropRepository;
+  // Module 3 — FPO Management & Farmer Aggregation. Same injection pattern.
+  fpoRepository: FpoRepository;
+  fpoAdminRepository: FpoAdminRepository;
+  fpoMembershipRepository: FpoMembershipRepository;
+  aggregationGroupRepository: AggregationGroupRepository;
 }
 
 export function createApp(deps: AppDependencies): Express {
@@ -78,6 +99,48 @@ export function createApp(deps: AppDependencies): Express {
     deps.auditService,
   );
 
+  // Module 3 — FPO Management & Farmer Aggregation.
+  const fpoAuthorization = new FpoAuthorizationService(deps.fpoAdminRepository);
+  const fpoNotifications = new NoopFpoNotificationHooks();
+  const fpoService = new FpoService(
+    deps.fpoRepository,
+    deps.fpoAdminRepository,
+    deps.fpoMembershipRepository,
+    referenceDataService,
+    fpoAuthorization,
+    deps.auditService,
+  );
+  const fpoVerificationService = new FpoVerificationService(
+    deps.fpoRepository,
+    deps.fpoMembershipRepository,
+    deps.auditService,
+    fpoNotifications,
+  );
+  const fpoAdminService = new FpoAdminService(deps.fpoRepository, deps.fpoAdminRepository, deps.authRepository, deps.auditService);
+  const fpoMembershipService = new FpoMembershipService(
+    deps.fpoMembershipRepository,
+    deps.fpoRepository,
+    farmerProfileResolver,
+    fpoAuthorization,
+    deps.auditService,
+    fpoNotifications,
+  );
+  const fpoAggregationService = new FpoAggregationService(
+    deps.fpoRepository,
+    deps.fpoMembershipRepository,
+    deps.farmerCropRepository,
+    deps.farmerProfileRepository,
+    deps.aggregationGroupRepository,
+    referenceDataService,
+    fpoAuthorization,
+    deps.auditService,
+  );
+  const governmentFpoService = new GovernmentFpoService(
+    deps.fpoRepository,
+    deps.fpoMembershipRepository,
+    deps.farmerCropRepository,
+  );
+
   app.get("/health", (_req, res) => res.status(200).json({ success: true, data: { status: "ok" } }));
 
   app.use("/api/docs", swaggerUi.serve, swaggerUi.setup(swaggerSpec));
@@ -91,8 +154,24 @@ export function createApp(deps: AppDependencies): Express {
 
   app.use("/api/reference", createReferenceDataRouter(referenceDataService, deps.authRepository, deps.auditService));
   app.use("/api/farmers/me/crops", createCropsRouter(cropsService, deps.authRepository, deps.auditService));
+  app.use("/api/farmers/me/fpo", createMyFpoRouter(fpoMembershipService, deps.authRepository, deps.auditService));
   app.use("/api/farmers", createFarmersRouter(farmersService, deps.authRepository, deps.auditService));
   app.use("/api/farms", createFarmsRouter(farmsService, deps.authRepository, deps.auditService));
+
+  // Module 3 — FPO Management & Farmer Aggregation.
+  app.use(
+    "/api/fpos",
+    createFpoRouter(fpoService, fpoMembershipService, fpoAggregationService, deps.authRepository, deps.auditService),
+  );
+  app.use(
+    "/api/fpo-memberships",
+    createMembershipActionsRouter(fpoMembershipService, deps.authRepository, deps.auditService),
+  );
+  app.use(
+    "/api/admin",
+    createAdminFpoRouter(fpoService, fpoVerificationService, fpoAdminService, deps.authRepository, deps.auditService),
+  );
+  app.use("/api/government", createGovernmentFpoRouter(governmentFpoService, deps.authRepository, deps.auditService));
 
   app.use(notFoundHandler);
   app.use(errorHandler);

@@ -9,6 +9,10 @@ import { PrismaReferenceDataRepository } from "./modules/reference-data/referenc
 import { PrismaFarmerProfileRepository } from "./modules/farmers/farmer-profile.repository";
 import { PrismaFarmsRepository } from "./modules/farms/farms.repository";
 import { PrismaFarmerCropRepository } from "./modules/crops/farmer-crop.repository";
+import { PrismaFpoRepository } from "./modules/fpo/fpo.repository";
+import { PrismaFpoAdminRepository } from "./modules/fpo/fpo-admin.repository";
+import { PrismaFpoMembershipRepository } from "./modules/fpo/membership.repository";
+import { PrismaAggregationGroupRepository } from "./modules/fpo/aggregation.repository";
 
 async function main() {
   initSentry();
@@ -19,6 +23,10 @@ async function main() {
   const farmerProfileRepository = new PrismaFarmerProfileRepository(prisma);
   const farmsRepository = new PrismaFarmsRepository(prisma);
   const farmerCropRepository = new PrismaFarmerCropRepository(prisma);
+  const fpoRepository = new PrismaFpoRepository(prisma);
+  const fpoAdminRepository = new PrismaFpoAdminRepository(prisma);
+  const fpoMembershipRepository = new PrismaFpoMembershipRepository(prisma);
+  const aggregationGroupRepository = new PrismaAggregationGroupRepository(prisma);
 
   const app = createApp({
     authRepository,
@@ -28,6 +36,10 @@ async function main() {
     farmerProfileRepository,
     farmsRepository,
     farmerCropRepository,
+    fpoRepository,
+    fpoAdminRepository,
+    fpoMembershipRepository,
+    aggregationGroupRepository,
   });
 
   await prisma.$connect();

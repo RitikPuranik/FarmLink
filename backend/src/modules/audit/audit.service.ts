@@ -24,7 +24,24 @@ export type AuditAction =
   | "CROP_UPDATED"
   | "CROP_REMOVED"
   | "FPO_ASSOCIATED"
-  | "PREFERENCE_UPDATED";
+  | "PREFERENCE_UPDATED"
+  // Module 3 — FPO Management & Farmer Aggregation
+  | "FPO_CREATED"
+  | "FPO_UPDATED"
+  | "FPO_VERIFIED"
+  | "FPO_REJECTED"
+  | "FPO_SUSPENDED"
+  | "FPO_REACTIVATED"
+  | "FPO_ADMIN_ADDED"
+  | "FPO_ADMIN_REMOVED"
+  | "MEMBERSHIP_REQUESTED"
+  | "MEMBERSHIP_APPROVED"
+  | "MEMBERSHIP_REJECTED"
+  | "MEMBER_SUSPENDED"
+  | "MEMBER_REMOVED"
+  | "AGGREGATION_CREATED"
+  | "AGGREGATION_UPDATED"
+  | "AGGREGATION_CANCELLED";
 
 export interface AuditEvent {
   actorUserId?: string | null;

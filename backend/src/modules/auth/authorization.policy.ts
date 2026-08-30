@@ -15,8 +15,8 @@ export const AUTHORIZATION_POLICY: Record<UserRole, { allow: string[]; deny: str
     deny: ["/api/admin/*", "self role modification", "verification approval"],
   },
   FPO_ADMIN: {
-    allow: ["future FPO management endpoints"],
-    deny: ["/api/admin/*"],
+    allow: ["FPO-scoped endpoints under /api/fpos/:fpoId/* where an active FpoAdmin row exists for that FPO (see modules/fpo/fpo.authorization.ts) — role alone is never sufficient"],
+    deny: ["/api/admin/*", "any other FPO's data"],
   },
   BUYER: {
     allow: ["future buyer endpoints"],
@@ -35,7 +35,7 @@ export const AUTHORIZATION_POLICY: Record<UserRole, { allow: string[]; deny: str
     deny: [],
   },
   GOVERNMENT_VIEWER: {
-    allow: ["authorized read-only dashboards later"],
-    deny: ["user mutation", "verification mutation"],
+    allow: ["authorized read-only dashboards later", "GET /api/government/fpo-summary (aggregate only, no individual farmer records)"],
+    deny: ["user mutation", "verification mutation", "any FPO/membership/aggregation write"],
   },
 };

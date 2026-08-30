@@ -43,6 +43,13 @@ export class InMemoryFarmerCropRepository implements FarmerCropRepository {
       .map((r) => this.withCrop(r)) as never;
   }
 
+  async findManyByFarmerProfileIds(farmerProfileIds: string[]) {
+    return this.rows
+      .filter((r) => farmerProfileIds.includes(r.farmerProfileId))
+      .sort((a, b) => a.createdAt.getTime() - b.createdAt.getTime())
+      .map((r) => this.withCrop(r)) as never;
+  }
+
   async findManyByFarmId(farmId: string) {
     return this.rows.filter((r) => r.farmId === farmId) as never;
   }

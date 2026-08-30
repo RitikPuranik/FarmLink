@@ -20,12 +20,29 @@ export interface FakeFarmerProfile {
 export class InMemoryFarmerProfileRepository implements FarmerProfileRepository {
   profiles: FakeFarmerProfile[] = [];
 
+  /** Injected lazily by buildTestApp.ts (avoids a circular constructor
+   * dependency between the farmer-profile and auth in-memory repos) — see
+   * setUsersRepository below. */
+  private users?: { users: { id: string; publicId: string; fullName: string }[] };
+
+  setUsersRepository(users: { users: { id: string; publicId: string; fullName: string }[] }) {
+    this.users = users;
+  }
+
   async findByUserId(userId: string) {
     return (this.profiles.find((p) => p.userId === userId) as never) ?? null;
   }
 
   async findById(id: string) {
     return (this.profiles.find((p) => p.id === id) as never) ?? null;
+  }
+
+  async findManyByIdsWithUser(ids: string[]) {
+    const matches = this.profiles.filter((p) => ids.includes(p.id));
+    return matches.map((p) => {
+      const user = this.users?.users.find((u) => u.id === p.userId);
+      return { ...p, user } as never;
+    });
   }
 
   async create(data: CreateFarmerProfileData) {

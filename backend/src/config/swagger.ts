@@ -6,15 +6,20 @@ const options: swaggerJsdoc.Options = {
   definition: {
     openapi: "3.0.3",
     info: {
-      title: "FarmLink Intelligence API — Modules 1 & 2",
-      version: "1.1.0",
+      title: "FarmLink Intelligence API — Modules 1, 2 & 3",
+      version: "1.2.0",
       description:
         "SIH26132 — Strengthening market linkages and price discovery for farmers. " +
         "Module 1: identity, authentication, session management, and role-based " +
         "access control. Module 2: farmer & farm profile management — farmer " +
         "profiles, farms, crops, and location/crop/FPO reference data — built on " +
-        "top of the identity Module 1 issues. Later business modules (market " +
-        "prices, buyers, logistics, etc.) are not yet part of this API.",
+        "top of the identity Module 1 issues. Module 3: FPO management & farmer " +
+        "aggregation — FPO registration/verification, farmer membership " +
+        "requests/approval, the FPO member directory, crop-wise supply " +
+        "aggregation from Module 2 farmer/farm/crop data, aggregation targets, " +
+        "FPO analytics, and a read-only government summary. Later business " +
+        "modules (crop lots, quality grading, buyers, logistics, etc.) are not " +
+        "yet part of this API.",
     },
     servers: [{ url: env.BACKEND_URL, description: "Current environment" }],
     components: {

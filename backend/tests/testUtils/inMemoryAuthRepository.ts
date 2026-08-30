@@ -87,6 +87,10 @@ export class InMemoryAuthRepository implements AuthRepository {
     return (this.users.find((u) => u.id === id) as never) ?? null;
   }
 
+  async findManyByIds(ids: string[]) {
+    return this.users.filter((u) => ids.includes(u.id)) as never;
+  }
+
   async createUser(data: CreateUserData) {
     const now = new Date();
     const user: FakeUser = {

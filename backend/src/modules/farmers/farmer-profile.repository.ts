@@ -1,4 +1,6 @@
-import { CommunicationPreference, FarmerProfile, FpoMembershipStatus, LiquidityPreference, PrismaClient } from "@prisma/client";
+import { CommunicationPreference, FarmerProfile, FpoMembershipStatus, LiquidityPreference, PrismaClient, User } from "@prisma/client";
+
+export type FarmerProfileWithUser = FarmerProfile & { user: Pick<User, "id" | "publicId" | "fullName"> };
 
 export interface CreateFarmerProfileData {
   userId: string;
@@ -26,6 +28,13 @@ export interface UpdateFarmerProfileData {
 export interface FarmerProfileRepository {
   findByUserId(userId: string): Promise<FarmerProfile | null>;
   findById(id: string): Promise<FarmerProfile | null>;
+  /**
+   * Batch lookup with the owning User's public-safe display fields —
+   * added for Module 3's aggregation-by-farmer breakdown (build spec
+   * section 33) and member directory, so resolving N farmerProfileIds
+   * back to a display name costs one query instead of N. Purely additive.
+   */
+  findManyByIdsWithUser(ids: string[]): Promise<FarmerProfileWithUser[]>;
   create(data: CreateFarmerProfileData): Promise<FarmerProfile>;
   update(id: string, data: UpdateFarmerProfileData): Promise<FarmerProfile>;
 }
@@ -39,6 +48,14 @@ export class PrismaFarmerProfileRepository implements FarmerProfileRepository {
 
   findById(id: string) {
     return this.prisma.farmerProfile.findUnique({ where: { id } });
+  }
+
+  findManyByIdsWithUser(ids: string[]) {
+    if (ids.length === 0) return Promise.resolve([]);
+    return this.prisma.farmerProfile.findMany({
+      where: { id: { in: ids } },
+      include: { user: { select: { id: true, publicId: true, fullName: true } } },
+    });
   }
 
   create(data: CreateFarmerProfileData) {

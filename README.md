@@ -1,4 +1,4 @@
-# FarmLink Intelligence — Modules 1 & 2
+# FarmLink Intelligence — Modules 1, 2 & 3
 
 **SIH26132** — Strengthening market linkages and price discovery for farmers.
 
@@ -12,17 +12,25 @@ This repository currently contains:
   farmer↔crop records, selling preferences (liquidity/storage/FPO/
   communication), and the normalized location + crop + FPO reference data
   that back them.
+- **Module 3 (backend only)** — FPO Management & Farmer Aggregation, built
+  on top of Modules 1 & 2. FPO registration/verification/administration,
+  farmer membership requests and approval, the FPO member directory,
+  crop-wise supply aggregation computed live from Module 2's farmer/farm/
+  crop data, aggregation targets, FPO analytics, and a read-only
+  government summary. No frontend/e2e work was in scope for Module 3 — see
+  `backend/README.md` for the full write-up.
 
-Market prices, buyer matching, warehouse/logistics, offers, payments,
-shipments, and grievances are still explicitly out of scope — Module 2
-only builds the data structures those modules will need (see "Future
-compatibility" below), not the modules themselves.
+Crop/lot management, quality grading, market intelligence, price
+forecasting, sell-vs-store, warehouse, buyer management/matching, offers/
+RFQ, and logistics/shipment/payment/grievance are still explicitly out of
+scope — Module 3 only builds the data structures those modules will need
+(see "What's next" below), not the modules themselves.
 
 ```
 farmlink/
   backend/    Express + TypeScript + Prisma/PostgreSQL API (see backend/README.md)
-  frontend/   Next.js + TypeScript + Tailwind UI
-  e2e/        Playwright end-to-end flow
+  frontend/   Next.js + TypeScript + Tailwind UI (Modules 1 & 2 only — Module 3 is backend-only)
+  e2e/        Playwright end-to-end flow (Modules 1 & 2 only)
 ```
 
 ## Quick start
@@ -33,11 +41,11 @@ cd backend
 npm install
 cp .env.example .env          # fill in real secrets
 npx prisma generate
-npx prisma migrate dev --name module_2_farmer_farm_profile
-npm run prisma:seed           # demo farmer + Maharashtra locations + crop catalog + demo FPO
+npx prisma migrate dev --name module_3_fpo_management
+npm run prisma:seed           # demo farmer + Maharashtra locations + crop catalog + demo FPO (verified, with an admin + 50 fictional members)
 npm run dev                   # http://localhost:4000, docs at /api/docs
 
-# 2. Frontend (separate terminal)
+# 2. Frontend (separate terminal — Modules 1 & 2 only, no Module 3 UI)
 cd frontend
 npm install
 cp .env.example .env.local
@@ -50,11 +58,10 @@ npx playwright install chromium
 npm test
 ```
 
-Demo login (after seeding): mobile `9876543210`, password `DemoFarmer123!`
-— already has a complete Module 2 profile (a farm in Nashik, Onion +
-Soybean, Onion set primary, FPO membership, selling preferences) so you can
-see the dashboard/profile pages fully populated without doing the
-onboarding flow yourself.
+Demo logins (after seeding):
+- Farmer: mobile `9876543210`, password `DemoFarmer123!`
+- FPO admin (of the seeded, VERIFIED demo FPO): mobile `9876500000`,
+  password `DemoFpoAdmin123!`
 
 ## What's implemented
 
@@ -81,12 +88,11 @@ normalized `State → District → Taluka` + free-text village, area/unit,
 irrigation type), `FarmerCrop[]` (many-to-many farmer↔crop with area,
 optional typical yield, and a per-farm primary-crop flag), `Crop` +
 `CropTranslation` (English/Hindi/Marathi names, never duplicate crop rows
-per language), and a minimal `Fpo` reference table. Profile completion is
-**computed on every read**, never stored — see
-`backend/src/modules/farmers/completion.ts` for the exact weighting.
+per language). Profile completion is **computed on every read**, never
+stored — see `backend/src/modules/farmers/completion.ts` for the exact
+weighting.
 
-**API** (all under `/api`, all FARMER-only + session-derived ownership —
-see "Security" below):
+**API** (all under `/api`, all FARMER-only + session-derived ownership):
 
 | Endpoint | Purpose |
 | --- | --- |
@@ -98,110 +104,128 @@ see "Security" below):
 | `GET/POST /farmers/me/crops`, `PATCH/DELETE /farmers/me/crops/:id` | Farmer↔crop CRUD, including setting a primary crop |
 | `GET /reference/{languages,irrigation-types,states,districts,talukas,crops,fpos}` | Reference/lookup data for every form above |
 
-**Frontend**: `/profile` now leads with the farmer profile (personal info,
-profile completion, farms, crops, FPO/selling preferences) for FARMER
-accounts — Module 1's "Account & security" tools (change password,
-sessions) stay on the same page, just below it, unchanged for every role.
-`/farms/new` is a dedicated farm-creation form; editing/deleting a farm and
-all crop management happens inline in cards on `/profile`. The dashboard
-(`/dashboard`) now shows profile completion + a farm/crop/FPO/preference
-summary instead of a "not part of Module 1 yet" placeholder. Cascading
-state→district→taluka selects, English/Hindi/Marathi throughout (150
-translation keys per language), loading/error/retry and empty states on
-every API-backed section, mobile-first layout (large tap targets, cards
-instead of dense tables).
+### Module 3 — FPO Management & Farmer Aggregation (backend only)
 
-**Security**: every self-service endpoint derives the farmer from the
-authenticated session (`req.user.id`) — never from a client-supplied
-`farmerId`/`userId` in the body or query string. A farm or crop record
-belonging to a different farmer 404s (or, for the crop-add case, where the
-spec calls for it explicitly, 403s) rather than leaking whether the
-resource exists. Setting a new primary crop is a single DB transaction
-(`FarmerCropRepository.setPrimary`) so a farm can never end up with two
-primary crops from a partial update. FPO ids and crop ids are always
-verified server-side, never trusted from the client. Precise farm
-coordinates are never sent to PostHog (see `BLOCKED_PROPERTY_KEYS` in
-`backend/src/config/posthog.ts`).
+**Data model**: the `Fpo` model Module 2 originally added as a minimal
+reference stub is **extended in place** (not duplicated) with full
+registration/verification/account fields — see that model's comment in
+`schema.prisma`. Three new models: `FpoAdmin` (who administers which FPO —
+an `FPO_ADMIN` role alone never grants access to a specific FPO, see
+`modules/fpo/fpo.authorization.ts`), `FpoMembership` (the admin-approved
+farmer↔FPO join workflow — deliberately separate from Module 2's
+self-declared `FarmerProfile.fpoMembershipStatus`, see that field's
+comment), and `AggregationGroup` (a planning target only — never a sale/
+order/contract/lot/shipment).
 
-- 127 backend tests total (72 from Module 1, unchanged and still passing +
-  55 new for Module 2: reference-data, farmer-profile, farms, crops
-  including the primary-crop transaction and duplicate/ownership cases, a
-  pure unit suite for the completion calculator, and a full end-to-end
-  acceptance test mirroring the build spec's section-70 flow) + a
-  Playwright E2E flow.
+**API** (all under `/api`):
+
+| Endpoint | Purpose |
+| --- | --- |
+| `GET/POST /fpos` | Search FPOs (public-safe) / register a new one (`FPO_ADMIN`/`ADMIN`, auto-assigns the creator as `PRIMARY_ADMIN` if they're an `FPO_ADMIN`) |
+| `GET /fpos/:fpoId` | Details — public-safe by default, richer for the FPO's own admin/platform `ADMIN` |
+| `POST /fpos/:fpoId/membership-requests` | Farmer requests to join (identity always from the session, never the body) |
+| `GET /fpos/:fpoId/members` | Private member directory (own `FPO_ADMIN`/`ADMIN` only) |
+| `POST /fpo-memberships/:membershipId/{approve,reject,remove,suspend,reactivate}` | Membership state machine |
+| `GET /farmers/me/fpo` | The authenticated farmer's own current/pending membership |
+| `GET /fpos/:fpoId/crop-aggregation` | Live crop-wise estimated supply from active members (`FPO_ADMIN` own / `ADMIN` / `GOVERNMENT_VIEWER` aggregate) |
+| `GET /fpos/:fpoId/crop-aggregation/:cropId/members` | Per-farmer breakdown for one crop (admin-only) |
+| `GET/POST /fpos/:fpoId/aggregation-groups`, `PATCH/POST .../:aggregationId{,/cancel}` | Aggregation targets vs. live estimate, with `gapQuantity` |
+| `GET /fpos/:fpoId/analytics/overview` | Member counts, top crops, active targets |
+| `GET /admin/fpos`, `.../:fpoId`, `.../{verify,reject,suspend,reactivate}`, `.../:fpoId/admins` | Platform `ADMIN`-only lifecycle + admin assignment |
+| `GET /government/fpo-summary` | Read-only national FPO/crop-supply summary (`GOVERNMENT_VIEWER`) |
+
+**Crop-aggregation math** (`modules/fpo/unit-conversion.ts`): normalizes
+every farmer-crop row's free-text `yieldUnit` (e.g. `"QTL/ACRE"`) into KG
+internally before summing, converts back to QTL for display. A missing
+`typicalYield` or an unrecognized `yieldUnit` string is **never** treated
+as zero or guessed — it's excluded from the sum and reported via an
+`estimateCoverage` field (`farmersWithEstimate` vs. `totalFarmers`), so a
+partial estimate is never silently indistinguishable from a complete one.
+The whole engine is two batched queries (active member ids, then their
+crop rows) plus in-memory grouping — never a per-farmer query loop.
+
+**Security**: `FpoAuthorizationService.canManageFpo` is the single place
+every FPO-scoped admin action checks ownership through — an `FPO_ADMIN`
+role alone is never sufficient, an active `FpoAdmin` row for that specific
+`(userId, fpoId)` (or platform `ADMIN`) is required. Every membership/
+aggregation-group state change goes through a conditional/atomic
+`transition()` primitive (only applies if the row is still in an expected
+starting status), so double-approval, double-removal, and races fail with
+a clear 409 rather than corrupting data. See
+`tests/integration/fpo.security.test.ts` for the mandatory cross-FPO IDOR,
+farmer-identity-spoofing, and government-read-only test cases.
+
+- 178 backend tests total (127 from Modules 1 & 2, unchanged and still
+  passing, + 51 new for Module 3: registration/search/details, the full
+  membership workflow including the worked crop-aggregation example from
+  the build spec (20+30+50=100 QTL), missing-yield/unit-conversion cases,
+  aggregation targets, analytics, admin verification/suspension/admin-
+  assignment, and the mandatory security suite).
 
 ## Verification status (read this before assuming something's broken)
 
 This was built in a network-sandboxed environment that could reach npm and
 GitHub but **not** `binaries.prisma.sh`, so Prisma's query/schema-engine
-binaries couldn't be downloaded here. Practical effect (same situation
-Module 1 was originally delivered under — see `backend/prisma/README-engines.md`):
+binaries couldn't be downloaded here — same situation Modules 1 & 2 were
+originally delivered under (see `backend/prisma/README-engines.md`):
 
 - Backend logic, RBAC, ownership, and the full Jest+Supertest suite
-  (127/127 passing, `isolatedModules: true` in ts-jest means this runs
+  (178/178 passing, `isolatedModules: true` in ts-jest means this runs
   without full cross-file type-checking) were verified using in-memory fake
-  repositories instead of a live Prisma client for **both** modules — see
-  `backend/tests/testUtils/`. Module 2's fakes (`inMemoryFarmerProfileRepository.ts`,
-  `inMemoryFarmsRepository.ts`, `inMemoryFarmerCropRepository.ts`,
-  `inMemoryReferenceDataRepository.ts`) join the existing `inMemoryAuthRepository.ts`.
-- `eslint` is clean on both `backend/src` and `backend/tests` (0 errors, 2
-  pre-existing warnings in Module 1's `app.ts` debug-Sentry route, both
-  unrelated to Module 2).
-- The frontend has a full clean `next build`, `next lint`, and
-  `tsc --noEmit` pass in this sandbox — no caveats there, including every
-  new Module 2 page/route.
+  repositories instead of a live Prisma client for **all three** modules —
+  see `backend/tests/testUtils/`. Module 3's fakes
+  (`inMemoryFpoRepository.ts`, `inMemoryFpoAdminRepository.ts`,
+  `inMemoryFpoMembershipRepository.ts`, `inMemoryAggregationGroupRepository.ts`)
+  join the existing ones, following the exact same pattern.
+- `npx tsc --noEmit` cannot succeed in this sandbox for *any* module (46
+  pre-existing errors on the untouched Module 1/2 code before any Module 3
+  change, all "no exported member" from `@prisma/client`'s placeholder
+  default client) — this is the missing-generated-client limitation above,
+  not a code defect; `prisma/README-engines.md` documents the same finding
+  from Module 1/2's original build.
 - `prisma/schema.prisma` was hand-verified against Prisma's documented
-  syntax (relation fields, `@@unique` compound-key naming, enums) rather
-  than `prisma validate`, for the same binaries.prisma.sh reason. There is
-  still no `prisma/migrations/` folder checked in — exactly as Module 1
-  left it — because generating one requires the same blocked engine
-  binaries. Run `npx prisma generate && npx prisma migrate dev --name
-  module_2_farmer_farm_profile` once on a machine with normal internet
-  access and both this and Module 1's original caveat resolve together.
+  syntax rather than `prisma validate`, for the same reason. There is
+  still no `prisma/migrations/` folder checked in. `FpoMembership`'s
+  "one ACTIVE membership per farmer" rule is enforced server-side in
+  `membership.service.ts`; the ideal *additional* DB-level enforcement is a
+  partial unique index that Prisma's schema DSL can't express
+  declaratively — the exact SQL to hand-add is documented in a comment
+  above the `FpoMembership` model. Run `npx prisma generate && npx prisma
+  migrate dev --name module_3_fpo_management` once on a machine with
+  normal internet access and everything (including Modules 1 & 2's
+  original caveat) resolves together.
 
 ## Design notes worth knowing before you extend this
 
 - **`app.ts` is still fully dependency-injected**, now with four more
-  repositories (`referenceDataRepository`, `farmerProfileRepository`,
-  `farmsRepository`, `farmerCropRepository`) alongside Module 1's
-  `authRepository`/`auditService`. `server.ts` is still the only file that
-  constructs real Prisma-backed repositories; `tests/testUtils/buildTestApp.ts`
-  constructs the in-memory fakes instead — same pattern as Module 1, just
-  more of it.
-- **A `FarmerProfile` row is created lazily, on first use** — by
-  `GET /farmers/me`, by creating a farm, or by adding a crop — rather than
-  requiring the client to call `POST /farmers/me/profile` first. This
-  doesn't weaken the 409-on-duplicate check on that endpoint (see
-  `FarmerProfileResolver`'s doc comment in
-  `backend/src/modules/farmers/farmer-profile.resolver.ts`); it just means
-  "add a farm" doesn't have an artificial ordering dependency on "fill out
-  your selling preferences" — they're genuinely independent steps in the
-  same onboarding flow.
-- **Selling preferences live directly on `FarmerProfile`**, not a separate
-  `FarmerPreferences` table — see the comment above the `FarmerProfile`
-  model in `schema.prisma` for why.
-- **Profile completion is computed on read, never stored.** See
-  `backend/src/modules/farmers/completion.ts`. This is what makes "the
-  frontend must never send `profileCompletionPercentage` as authoritative"
-  impossible to violate by construction, rather than just a rule to
-  remember.
-- **Frontend route protection is UX only**, same as Module 1 —
-  `ProtectedRoute` / `RoleProtectedPage` redirect for a better experience,
-  but every protected API call is independently re-checked server-side
-  regardless.
-- **Cookies vs. bearer tokens:** unchanged from Module 1 — the refresh
-  token lives in an HttpOnly, Secure (in prod), SameSite cookie; the
-  short-lived access token is kept in memory on the frontend, sent via
-  `Authorization: Bearer`.
+  Module 3 repositories (`fpoRepository`, `fpoAdminRepository`,
+  `fpoMembershipRepository`, `aggregationGroupRepository`) alongside
+  Module 2's four and Module 1's `authRepository`/`auditService`.
+  `server.ts` is still the only file that constructs real Prisma-backed
+  repositories; `tests/testUtils/buildTestApp.ts` constructs the in-memory
+  fakes instead.
+- **Every Module 3 URL segment (`:fpoId`, `:membershipId`,
+  `:aggregationId`) is a `publicId`, never the internal database id** —
+  same externally-facing-identifier convention as `User.publicId`.
+- **Two intentionally separate "is this farmer in this FPO" signals.**
+  Module 2's `FarmerProfile.fpoMembershipStatus`/`fpoId` (self-declared,
+  no approval) is left completely untouched; `FpoMembership` (this module)
+  is the audited, admin-approved source of truth. They are not merged —
+  see the comment on `fpoMembershipStatus` in `schema.prisma` for why.
+- **FPO `suspend`/`reactivate` moves both `accountStatus` and
+  `verificationStatus` together** — the build spec describes the
+  operational gate via one and the state-machine transition via the other
+  for the same action; `fpo-verification.service.ts`'s doc comment walks
+  through the reasoning.
+- **Cookies vs. bearer tokens:** unchanged from Modules 1 & 2.
 
-## What's next (Module 3+, not in this repo)
+## What's next (Module 4+, not in this repo)
 
-Market Intelligence (consumes `Farm.district`/`Farm.state`), the Sell vs.
-Store decision engine (consumes `FarmerProfile.liquidityPreference` +
-`willingToStore`), Buyer Matching (consumes `FarmerCrop`), Warehouse
-recommendations (consumes farm location + `willingToStore`), Logistics
-(consumes authorized pickup location), and eventually FPO/buyer/
-transporter/warehouse profiles, lots, offers, payments, shipments,
-grievances, analytics. All of them are expected to read Module 2's data
-through the services in `backend/src/modules/{farmers,farms,crops}` rather
-than duplicating farmer/farm/crop state of their own.
+Crop/Lot Management (consumes `AggregationGroup` — never fakes a `lotId`
+today), Quality Grading, Market Intelligence, Price Forecasting, Sell vs.
+Store, Warehouse, Buyer Management/Matching (consumes
+`FpoAggregationService.getFpoCropAvailability`), Offers/RFQ, and
+Logistics/Shipment/Payment/Grievance. All of them are expected to read
+Module 3's data through the services in `backend/src/modules/fpo` rather
+than duplicating FPO/membership/aggregation state of their own.
+

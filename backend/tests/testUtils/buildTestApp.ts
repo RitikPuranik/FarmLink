@@ -5,6 +5,10 @@ import { InMemoryReferenceDataRepository } from "./inMemoryReferenceDataReposito
 import { InMemoryFarmerProfileRepository } from "./inMemoryFarmerProfileRepository";
 import { InMemoryFarmsRepository } from "./inMemoryFarmsRepository";
 import { InMemoryFarmerCropRepository } from "./inMemoryFarmerCropRepository";
+import { InMemoryFpoRepository } from "./inMemoryFpoRepository";
+import { InMemoryFpoAdminRepository } from "./inMemoryFpoAdminRepository";
+import { InMemoryFpoMembershipRepository } from "./inMemoryFpoMembershipRepository";
+import { InMemoryAggregationGroupRepository } from "./inMemoryAggregationGroupRepository";
 
 export function buildTestApp() {
   const authRepository = new InMemoryAuthRepository();
@@ -14,8 +18,23 @@ export function buildTestApp() {
   // Module 1 (see InMemoryAuthRepository above and prisma/README-engines.md).
   const referenceDataRepository = new InMemoryReferenceDataRepository();
   const farmerProfileRepository = new InMemoryFarmerProfileRepository();
+  farmerProfileRepository.setUsersRepository(authRepository);
   const farmsRepository = new InMemoryFarmsRepository(referenceDataRepository);
   const farmerCropRepository = new InMemoryFarmerCropRepository(referenceDataRepository, farmsRepository);
+
+  // Module 3 — FPO Management & Farmer Aggregation. Same approach; the
+  // membership repository additionally joins across the fakes above to
+  // replicate the real Prisma `include` used by the member directory.
+  const fpoRepository = new InMemoryFpoRepository(referenceDataRepository);
+  const fpoAdminRepository = new InMemoryFpoAdminRepository();
+  const fpoMembershipRepository = new InMemoryFpoMembershipRepository(
+    referenceDataRepository,
+    farmerProfileRepository,
+    authRepository,
+    farmsRepository,
+    farmerCropRepository,
+  );
+  const aggregationGroupRepository = new InMemoryAggregationGroupRepository(referenceDataRepository);
 
   // The admin listing route is the only thing that touches `prisma`
   // directly (see modules/users/users.routes.ts) — a minimal fake is
@@ -44,6 +63,10 @@ export function buildTestApp() {
     farmerProfileRepository,
     farmsRepository,
     farmerCropRepository,
+    fpoRepository,
+    fpoAdminRepository,
+    fpoMembershipRepository,
+    aggregationGroupRepository,
   });
 
   return {
@@ -54,5 +77,9 @@ export function buildTestApp() {
     farmerProfileRepository,
     farmsRepository,
     farmerCropRepository,
+    fpoRepository,
+    fpoAdminRepository,
+    fpoMembershipRepository,
+    aggregationGroupRepository,
   };
 }
