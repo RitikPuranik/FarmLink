@@ -50,10 +50,7 @@ Next planned business modules include Quality, Market Intelligence, Price Foreca
 - `modules/crops/` — Module 2 farmer-crop CRUD/primary crop transaction
 - `modules/reference-data/` — states/districts/talukas/crops/FPOs/languages/irrigation types
 - `modules/fpo/` — Module 3 FPO registration/verification/admins, membership, aggregation, analytics, government summary
-<<<<<<< HEAD
 - `modules/lots/` — Module 4 CropLot lifecycle (create/list/get/update/publish/cancel/history), farmer- and FPO-owned lots, quantity normalization, status state machine
-=======
->>>>>>> ed2175aaba7058a61363be67718cd43bb75156e2
 - `app.ts` — dependency-injected Express app factory
 - `server.ts` — composition root; only place that constructs the real PrismaClient
 
@@ -104,7 +101,6 @@ Important Module 3 design decisions:
 - `AggregationGroup` is a planning target only, not a sale, order, contract, lot, shipment or inventory reservation.
 - Quantity is normalized internally to KG where aggregation logic requires unit conversion and may be displayed as QTL/tonne.
 
-<<<<<<< HEAD
 ### Module 4
 - `CropLot`
 - `LotStatusHistory`
@@ -119,8 +115,6 @@ Important Module 4 design decisions:
 - `LotQuantityService` (`reserve`/`release`/`consume`) is a deliberately internal-only foundation — nothing in Module 4 calls it yet, but the "available quantity can never go negative" guarantee is already enforced atomically in the repository (`adjustAvailableQuantity`, a guarded conditional `UPDATE`) for whichever future module wires it up.
 - `LotStatusHistory` is an append-only transition log kept alongside `CropLot.status`, not instead of it.
 
-=======
->>>>>>> ed2175aaba7058a61363be67718cd43bb75156e2
 ## Market Data — Existing Foundation (important for future modules)
 The project has an existing real market-data foundation from the user's previous implementation:
 - Existing `Crop` table
