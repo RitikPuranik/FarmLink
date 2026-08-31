@@ -29,6 +29,16 @@ const ALLOWED_EVENTS = new Set([
   "membership_approved",
   "membership_rejected",
   "aggregation_created",
+  // Module 4 — Crop / Lot Management (build spec section 60/98).
+  // "lot_creation_started" is deliberately included for the frontend's own
+  // future use (form-entry started) even though nothing in this backend
+  // fires it — Module 4 only knows a creation happened once it succeeds.
+  "lot_creation_started",
+  "lot_created",
+  "lot_published",
+  "lot_updated",
+  "lot_cancelled",
+  "lot_viewed",
 ]);
 
 // Defense in depth: even if a caller accidentally passes a sensitive key in

@@ -1,4 +1,4 @@
-# FarmLink Intelligence — Backend (Modules 1, 2 & 3)
+# FarmLink Intelligence — Backend (Modules 1, 2, 3 & 4)
 
 SIH26132 — Strengthening market linkages and price discovery for farmers.
 This backend currently covers:
@@ -16,12 +16,23 @@ This backend currently covers:
   and a read-only government summary. Built entirely on top of Modules 1
   & 2 — the `Fpo` reference stub Module 2 added is extended in place, not
   duplicated; no second `PrismaClient`, no second RBAC system.
+- **Module 4** — Crop / Lot Management: the first real transactional
+  object, `CropLot` — a farmer/FPO-declared actual quantity of produce,
+  distinct from Module 2's `FarmerCrop` ("I grow onion") and Module 3's
+  estimated `AggregationGroup` ("our members are estimated to have N
+  QTL"). Lot creation (farmer-owned against their own farm, or FPO-owned
+  by an active FPO admin), draft editing, publish/cancel through a
+  server-enforced status state machine with append-only history, KG/QTL/
+  TONNE quantity normalization, and a farmer lot dashboard summary. Built
+  on top of Modules 1-3 — reuses Module 3's `FpoAuthorizationService` and
+  `unit-conversion.ts` unchanged; no second FPO-scoping check, no second
+  quantity-conversion table.
 
-Every future FarmLink module (crop/lot management, quality grading, market
-intelligence, buyers, logistics, warehouses…) is expected to consume the
-identity Module 1 issues, the farmer/farm/crop data Module 2 issues, and
-the FPO/membership/aggregation data Module 3 issues — not duplicate any of
-them.
+Every future FarmLink module (quality grading, market intelligence,
+buyers, logistics, warehouses…) is expected to consume the identity
+Module 1 issues, the farmer/farm/crop data Module 2 issues, the FPO/
+membership/aggregation data Module 3 issues, and the actual `CropLot`
+data Module 4 issues — not duplicate any of them.
 
 ## Stack
 
@@ -45,13 +56,14 @@ The API is at `http://localhost:4000`, docs at `http://localhost:4000/api/docs`.
 > **Note on this build environment:** the sandbox this project was built in
 > could not reach `binaries.prisma.sh` to download Prisma's query/schema
 > engine binaries, so `prisma generate`/`migrate` could not be run here —
-> true for Module 1 originally, Module 2, and Module 3 now. Everything
+> true for Module 1 originally, Modules 2 & 3, and Module 4 now. Everything
 > else — repository/service/controller logic, RBAC, ownership checks,
-> validation, the full Jest+Supertest suite (178 tests: 127 from Modules 1
-> & 2 + 51 from Module 3) — was written and verified against in-memory fake
-> repositories instead (`tests/testUtils/`). Run the commands above once on
-> a machine with normal internet access and everything resolves normally;
-> nothing about this limitation requires touching application code.
+> validation, the full Jest+Supertest suite (198 tests: 127 from Modules 1
+> & 2 + 51 from Module 3 + 20 from Module 4) — was written and verified
+> against in-memory fake repositories instead (`tests/testUtils/`). Run the
+> commands above once on a machine with normal internet access and
+> everything resolves normally; nothing about this limitation requires
+> touching application code.
 
 ### Demo accounts (development only)
 
@@ -98,6 +110,9 @@ src/
     fpo/              Module 3 — FPO registration/verification/admins, membership workflow,
                        crop aggregation + unit normalization, aggregation targets, analytics,
                        government summary (see "Module 3" below for the file breakdown)
+    lots/             Module 4 — CropLot lifecycle (create/list/get/update/publish/cancel/
+                       history), farmer- and FPO-owned lots, status state machine, quantity
+                       normalization (see "Module 4" below for the file breakdown)
   app.ts        Express app factory — takes injected dependencies, never touches Prisma directly
   server.ts     composition root — the only file that constructs the real PrismaClient
 ```
@@ -106,9 +121,10 @@ src/
 `createApp({ authRepository, auditService, prisma, referenceDataRepository,
 farmerProfileRepository, farmsRepository, farmerCropRepository,
 fpoRepository, fpoAdminRepository, fpoMembershipRepository,
-aggregationGroupRepository })`. Tests pass in-memory fakes for all of
-these; `server.ts` passes the real Prisma-backed ones. This is also why
-the test suite runs without a live database — see `tests/testUtils/`.
+aggregationGroupRepository, cropLotRepository })`. Tests pass in-memory
+fakes for all of these; `server.ts` passes the real Prisma-backed ones.
+This is also why the test suite runs without a live database — see
+`tests/testUtils/`.
 
 ### Module 2 data model
 
@@ -204,6 +220,63 @@ suite (cross-FPO IDOR, farmer-identity spoofing, government read-only,
 role spoofing) — mirroring `rbac.security.test.ts` and the Module 2
 ownership-isolation tests it sits alongside.
 
+### Module 4 data model
+
+```
+CropLot
+  ├── farmer: FarmerProfile (Module 2, optional — set only when ownerType = FARMER)
+  ├── farm:   Farm (Module 2, optional — set only when ownerType = FARMER;
+  │           origin village/taluka/district/state snapshotted from it at
+  │           creation, never re-derived later)
+  ├── fpo:    Fpo (Module 3, optional — set only when ownerType = FPO; origin
+  │           snapshotted from the FPO's own registered location instead)
+  ├── crop:   Crop (Module 2, required)
+  └── statusHistory: LotStatusHistory[]  — append-only, kept alongside
+                                            CropLot.status, not instead of it
+```
+
+Exactly one of `farmer`/`farm` or `fpo` is set, matching `ownerType`
+(`FARMER`/`FPO`); `sourceType` (`FARMER_CREATED`/`FPO_AGGREGATED`) is
+tracked separately for future traceability. Quantities
+(`quantityKg`/`availableQuantityKg`) are Prisma `Decimal`, not `Float` —
+the one deliberate numeric-convention departure from Module 2/3, since a
+lot is the record future Sell/Store, Warehouse and Payment modules will do
+arithmetic against; `modules/fpo/unit-conversion.ts` is still reused
+as-is for KG/QTL/TONNE conversion above the repository boundary, which
+exposes plain `number`.
+
+### Module 4 security model
+
+- **Farm/FPO ownership is never trusted from the request.** `farmId` is
+  checked against the authenticated farmer's own `FarmerProfile` — a farm
+  that doesn't exist at all is a 404, one that exists but belongs to
+  someone else is a 403 (mirrors `CropsService`'s own farm-reference
+  check in Module 2, not `FarmsService.getOwnedOrThrow`'s uniform
+  not-found — see `lots.service.ts`'s comment on that distinction).
+  FPO-lot creation/management reuses
+  `FpoAuthorizationService.canManageFpo` unchanged (via
+  `LotAuthorizationService`), so it's exactly Module 3's own "an
+  `FPO_ADMIN` role alone never implies access to a specific FPO" rule.
+- **A lot's existence itself is not public.** Every `GET`/`PATCH`/`DELETE`/
+  `/publish`/`/cancel`/`/history` route on `/api/lots/:id` resolves
+  ownership through the same `loadOwnedLotOrThrow` — an unauthorized
+  caller (including a different farmer, or an FPO admin outside their own
+  FPO) gets the same 404 a nonexistent `publicId` would, never a 403 that
+  would confirm the lot exists.
+- **State transitions are atomic, mirroring Module 3.**
+  `CropLotRepository.transition()` is a guarded conditional `UPDATE`
+  (only applies if the row is still in one of the expected starting
+  statuses) exactly like `AggregationGroupRepository.transition()` — a
+  double-publish or double-cancel gets a clear 409, never a corrupted or
+  silently-reapplied state. `CropLotRepository.adjustAvailableQuantity`
+  follows the same pattern for the (not yet route-reachable)
+  reserve/release/consume foundation, so `availableQuantityKg` can never
+  go negative even under concurrent calls.
+- **Only explicit action endpoints change status** (`/publish`,
+  `/cancel`) — there is no generic `PATCH .../status`, so a client can
+  never smuggle an arbitrary status value the way an unrestricted PATCH
+  body would allow.
+
 ## What's intentionally not in Module 3
 
 Per the build spec: no crop lots, quality grading, market intelligence,
@@ -215,4 +288,19 @@ matching, offers/RFQ, transport/shipment, payments, or grievances.
 future Buyer Matching module to consume rather than inventing a fake
 `lotId` today. See "What's next" in the top-level README for exactly which
 future module consumes which Module 3 piece.
+
+## What's intentionally not in Module 4
+
+Per the build spec: no quality grading, market intelligence, price
+forecasting, sell-vs-store decisioning, warehouse management, buyer
+matching/discovery, offers/RFQ, transport/shipment, payments, or
+grievances. Reservation against a lot (`reserve`/`release`/`consume` on
+`LotQuantityService`) is built but deliberately not wired to any route —
+nothing in Module 4 calls it; it exists so the future Offers/RFQ or
+Warehouse module has a settled, already-safe-under-concurrency shape to
+call into rather than inventing its own quantity-mutation path. Lot
+splitting and merging (build spec sections 57-58) are explicitly out of
+scope — `CropLot`'s id/publicId/`LotStatusHistory` shape is meant to make
+a future `splitLot()`/`mergeLots()` addable without corrupting history,
+but neither is implemented here.
 

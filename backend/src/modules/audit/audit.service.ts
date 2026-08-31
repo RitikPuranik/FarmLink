@@ -41,7 +41,17 @@ export type AuditAction =
   | "MEMBER_REMOVED"
   | "AGGREGATION_CREATED"
   | "AGGREGATION_UPDATED"
-  | "AGGREGATION_CANCELLED";
+  | "AGGREGATION_CANCELLED"
+  // Module 4 — Crop / Lot Management (build spec section 59)
+  | "LOT_CREATED"
+  | "LOT_UPDATED"
+  | "LOT_DELETED"
+  | "LOT_PUBLISHED"
+  | "LOT_CANCELLED"
+  | "LOT_STATUS_CHANGED"
+  | "LOT_QUANTITY_RESERVED"
+  | "LOT_QUANTITY_RELEASED"
+  | "LOT_QUANTITY_CONSUMED";
 
 export interface AuditEvent {
   actorUserId?: string | null;

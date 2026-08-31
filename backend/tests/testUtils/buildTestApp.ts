@@ -9,6 +9,7 @@ import { InMemoryFpoRepository } from "./inMemoryFpoRepository";
 import { InMemoryFpoAdminRepository } from "./inMemoryFpoAdminRepository";
 import { InMemoryFpoMembershipRepository } from "./inMemoryFpoMembershipRepository";
 import { InMemoryAggregationGroupRepository } from "./inMemoryAggregationGroupRepository";
+import { InMemoryCropLotRepository } from "./inMemoryCropLotRepository";
 
 export function buildTestApp() {
   const authRepository = new InMemoryAuthRepository();
@@ -35,6 +36,11 @@ export function buildTestApp() {
     farmerCropRepository,
   );
   const aggregationGroupRepository = new InMemoryAggregationGroupRepository(referenceDataRepository);
+
+  // Module 4 — Crop / Lot Management. Joins across the Module 2/3 fakes
+  // above (crop/farm/fpo) the same way InMemoryAggregationGroupRepository
+  // joins against reference data.
+  const cropLotRepository = new InMemoryCropLotRepository(referenceDataRepository, farmsRepository, fpoRepository);
 
   // The admin listing route is the only thing that touches `prisma`
   // directly (see modules/users/users.routes.ts) — a minimal fake is
@@ -67,6 +73,7 @@ export function buildTestApp() {
     fpoAdminRepository,
     fpoMembershipRepository,
     aggregationGroupRepository,
+    cropLotRepository,
   });
 
   return {
@@ -81,5 +88,6 @@ export function buildTestApp() {
     fpoAdminRepository,
     fpoMembershipRepository,
     aggregationGroupRepository,
+    cropLotRepository,
   };
 }

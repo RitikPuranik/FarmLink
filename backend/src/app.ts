@@ -40,6 +40,12 @@ import { createFpoRouter } from "./modules/fpo/fpo.routes";
 import { createMembershipActionsRouter, createMyFpoRouter } from "./modules/fpo/membership.routes";
 import { createAdminFpoRouter } from "./modules/fpo/admin-fpo.routes";
 import { createGovernmentFpoRouter } from "./modules/fpo/government.routes";
+import { CropLotRepository } from "./modules/lots/lots.repository";
+import { LotStatusService } from "./modules/lots/lot-status.service";
+import { LotAuthorizationService } from "./modules/lots/lot.authorization";
+import { LotsService } from "./modules/lots/lots.service";
+import { createFarmerLotsSummaryRouter, createFpoLotsRouter, createLotsRouter } from "./modules/lots/lots.routes";
+import { env } from "./config/env";
 
 export interface AppDependencies {
   authRepository: AuthRepository;
@@ -58,6 +64,8 @@ export interface AppDependencies {
   fpoAdminRepository: FpoAdminRepository;
   fpoMembershipRepository: FpoMembershipRepository;
   aggregationGroupRepository: AggregationGroupRepository;
+  // Module 4 — Crop / Lot Management. Same injection pattern.
+  cropLotRepository: CropLotRepository;
 }
 
 export function createApp(deps: AppDependencies): Express {
@@ -141,6 +149,22 @@ export function createApp(deps: AppDependencies): Express {
     deps.farmerCropRepository,
   );
 
+  // Module 4 — Crop / Lot Management.
+  const lotStatusService = new LotStatusService();
+  const lotAuthorization = new LotAuthorizationService(fpoAuthorization);
+  const lotsService = new LotsService(
+    deps.cropLotRepository,
+    deps.farmsRepository,
+    deps.farmerCropRepository,
+    farmerProfileResolver,
+    deps.fpoRepository,
+    referenceDataService,
+    lotStatusService,
+    lotAuthorization,
+    deps.auditService,
+    env.FRONTEND_URL,
+  );
+
   app.get("/health", (_req, res) => res.status(200).json({ success: true, data: { status: "ok" } }));
 
   app.use("/api/docs", swaggerUi.serve, swaggerUi.setup(swaggerSpec));
@@ -172,6 +196,13 @@ export function createApp(deps: AppDependencies): Express {
     createAdminFpoRouter(fpoService, fpoVerificationService, fpoAdminService, deps.authRepository, deps.auditService),
   );
   app.use("/api/government", createGovernmentFpoRouter(governmentFpoService, deps.authRepository, deps.auditService));
+
+  // Module 4 — Crop / Lot Management.
+  app.use("/api/lots", createLotsRouter(lotsService, deps.authRepository, deps.auditService));
+  app.use("/api/farmers/me/lots", createFarmerLotsSummaryRouter(lotsService, deps.authRepository, deps.auditService));
+  // Mounted at the same /api/fpos prefix as Module 3's own router (fpo.routes.ts)
+  // — a second, separate router at the same prefix, not a change to that file.
+  app.use("/api/fpos", createFpoLotsRouter(lotsService, deps.authRepository, deps.auditService));
 
   app.use(notFoundHandler);
   app.use(errorHandler);

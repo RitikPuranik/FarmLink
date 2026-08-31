@@ -169,6 +169,43 @@ enum QuantityUnit {
 }
 
 // ---------------------------------------------------------------------------
+// Module 4 enums — Crop / Lot Management
+// ---------------------------------------------------------------------------
+
+// Build spec section 8/27: a controlled state machine — clients never set
+// this string directly (see lots.schemas.ts); every transition goes through
+// LotStatusService/CropLotRepository.transition().
+enum CropLotStatus {
+  DRAFT
+  AVAILABLE
+  PARTIALLY_COMMITTED
+  COMMITTED
+  STORED
+  IN_TRANSACTION
+  DELIVERED
+  COMPLETED
+  CANCELLED
+}
+
+// Build spec section 6/32: who the lot's produce belongs to right now.
+// Deliberately its own enum rather than reusing FpoMembershipStatus/
+// FpoAdminRole/etc. — "who owns this lot" has nothing to do with either of
+// those lifecycles.
+enum LotOwnerType {
+  FARMER
+  FPO
+}
+
+// Build spec section 16/54: how the lot came to exist, kept distinct from
+// ownerType — an FPO-owned lot is always FPO_AGGREGATED today, but the two
+// concepts are recorded separately so a future per-member-contribution lot
+// type doesn't have to overload ownerType to express it.
+enum LotSourceType {
+  FARMER_CREATED
+  FPO_AGGREGATED
+}
+
+// ---------------------------------------------------------------------------
 // Models
 // ---------------------------------------------------------------------------
 
@@ -210,6 +247,11 @@ model User {
   // than a single fpoId on User because an admin may manage more than one
   // FPO and an FPO may have more than one admin.
   fpoAdminRoles FpoAdmin[]
+
+  // Module 4. Who changed a lot's status — purely for LotStatusHistory
+  // display ("changed by Ramesh Patil"); never required, never a second
+  // source of truth for identity.
+  lotStatusChanges LotStatusHistory[]
 
   @@index([mobile])
   @@index([email])
@@ -440,6 +482,11 @@ model Fpo {
   memberships       FpoMembership[]
   aggregationGroups AggregationGroup[]
 
+  // Module 4 — FPO-admin-created aggregated lots (build spec section 14/
+  // 35). Never auto-created from AggregationGroup data — see CropLot's
+  // own comment.
+  cropLots CropLot[]
+
   @@index([stateId])
   @@index([districtId])
   @@index([talukaId])
@@ -463,6 +510,10 @@ model Crop {
   translations      CropTranslation[]
   farmerCrops       FarmerCrop[]
   aggregationGroups AggregationGroup[]
+
+  // Module 4. Restrict, not Cascade: a crop reference row must never
+  // disappear out from under a historical lot (mirrors FarmerCrop.crop).
+  cropLots CropLot[]
 
   @@map("crops")
 }
@@ -518,6 +569,10 @@ model FarmerProfile {
   // legacy self-declared fields.
   fpoMemberships FpoMembership[]
 
+  // Module 4 — actual declared produce (never a duplicate of estimated
+  // FarmerCrop/aggregation figures, see CropLot's own comment).
+  cropLots CropLot[]
+
   @@index([userId])
   @@index([fpoId])
   @@map("farmer_profiles")
@@ -553,6 +608,11 @@ model Farm {
   district      District      @relation(fields: [districtId], references: [id])
   taluka        Taluka        @relation(fields: [talukaId], references: [id])
   farmerCrops   FarmerCrop[]
+
+  // Module 4 — a farmer-created lot always references the farm it came
+  // from (build spec section 17/33). Restrict, not Cascade, on CropLot's
+  // side: a farm must never disappear out from under a historical lot.
+  cropLots CropLot[]
 
   @@index([farmerProfileId])
   @@index([stateId])
@@ -719,4 +779,124 @@ model AggregationGroup {
   @@index([cropId])
   @@index([status])
   @@map("aggregation_groups")
+}
+
+// ---------------------------------------------------------------------------
+// Module 4 — Crop / Lot Management
+//
+// Relationship shape (build spec section 33/87):
+//
+//   FarmerProfile -> Farm -> FarmerCrop -> CropLot
+//   Fpo -> CropLot (FPO-owned/aggregated lot, admin-created only)
+//
+// Core distinction this module exists to enforce (build spec section 54/
+// 88/102): FarmerCrop is "I grow onion" (Module 2), AggregationGroup/
+// crop-aggregation is "our members are estimated to have N QTL" (Module 3,
+// a planning target, never inventory), and CropLot is "I have created this
+// actual N QTL lot for downstream use" — the first real transactional
+// object in the system. A lot is never auto-created from FarmerCrop or
+// AggregationGroup data; the farmer/FPO admin must explicitly create it
+// (section 15/36/88).
+// ---------------------------------------------------------------------------
+
+// A real, farmer/FPO-declared quantity of produce (build spec section 5/6).
+// Quantities are stored as Decimal (not Float, unlike Module 2/3's
+// area/estimatedQuantity columns) because a lot is the actual transactional
+// record future Sell/Store, Warehouse and Payment modules will do
+// arithmetic against — see build spec section 65/83 and lots.repository.ts'
+// own comment on why the KG/QTL/TONNE conversion service still exposes
+// plain `number` to the rest of the application above the repository
+// boundary.
+model CropLot {
+  id       String @id @default(uuid())
+  publicId String @unique @default(uuid())
+
+  // Human-facing reference (build spec section 10), e.g. "LOT-2026-000123".
+  // Server-generated only — see lots/lot-number.ts — never accepted from
+  // the client, stable for the lifetime of the lot. publicId above remains
+  // the API identity used in URLs (build spec section 48).
+  lotNumber String @unique
+
+  ownerType  LotOwnerType
+  sourceType LotSourceType
+
+  // Exactly one of farmerId/fpoId is set, matching ownerType — enforced in
+  // lots.service.ts, never trusted from request body (build spec section
+  // 13/49/50). Restrict (not Cascade/SetNull): a farmer/FPO record must
+  // never disappear out from under a historical transactional lot.
+  farmerId String?
+  fpoId    String?
+
+  cropId String
+  // Only set for a farmer-created lot (build spec section 6/17) — an
+  // FPO-owned lot has no single owning Farm.
+  farmId String?
+
+  variety String?
+
+  // Internal source of truth, always KG (build spec section 11/65).
+  // `unit` below is only the unit the lot was originally created/displayed
+  // in — never re-derived arithmetic.
+  unit                QuantityUnit @default(KG)
+  quantityKg          Decimal      @db.Decimal(14, 2)
+  availableQuantityKg Decimal      @db.Decimal(14, 2)
+
+  harvestDate      DateTime?
+  availabilityDate DateTime
+
+  // Origin snapshot (build spec section 17/18/55): copied from the farm
+  // (or, for an FPO-owned lot, the FPO's own registered location) at
+  // creation time and never re-derived — so a later edit to the farm/FPO's
+  // profile can't silently rewrite a historical lot's recorded origin.
+  originVillage  String?
+  originTaluka   String?
+  originDistrict String
+  originState    String
+
+  status CropLotStatus @default(DRAFT)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  farmer FarmerProfile? @relation(fields: [farmerId], references: [id], onDelete: Restrict)
+  fpo    Fpo?           @relation(fields: [fpoId], references: [id], onDelete: Restrict)
+  crop   Crop           @relation(fields: [cropId], references: [id], onDelete: Restrict)
+  farm   Farm?          @relation(fields: [farmId], references: [id], onDelete: Restrict)
+
+  statusHistory LotStatusHistory[]
+
+  @@index([farmerId, status])
+  @@index([fpoId, status])
+  @@index([cropId, status])
+  @@index([farmId])
+  @@index([status])
+  @@index([availabilityDate])
+  @@index([createdAt])
+  @@map("crop_lots")
+}
+
+// Append-only transition log (build spec section 37/38/69) — kept
+// alongside CropLot.status rather than relied on instead of it, so "what is
+// this lot's status right now" is always a single indexed column read, and
+// "how did it get there" is a separate, never-mutated history.
+model LotStatusHistory {
+  id    String @id @default(uuid())
+  lotId String
+
+  // Null fromStatus represents the initial DRAFT row created alongside the
+  // lot itself (build spec section 69 example: `"from": null, "to": "DRAFT"`).
+  fromStatus CropLotStatus?
+  toStatus   CropLotStatus
+
+  changedBy String?
+  reason    String?
+
+  createdAt DateTime @default(now())
+
+  lot         CropLot @relation(fields: [lotId], references: [id], onDelete: Cascade)
+  changedByUser User? @relation(fields: [changedBy], references: [id], onDelete: SetNull)
+
+  @@index([lotId])
+  @@index([createdAt])
+  @@map("lot_status_history")
 }
