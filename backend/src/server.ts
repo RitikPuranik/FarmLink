@@ -14,6 +14,7 @@ import { PrismaFpoAdminRepository } from "./modules/fpo/fpo-admin.repository";
 import { PrismaFpoMembershipRepository } from "./modules/fpo/membership.repository";
 import { PrismaAggregationGroupRepository } from "./modules/fpo/aggregation.repository";
 import { PrismaCropLotRepository } from "./modules/lots/lots.repository";
+import { PrismaQualityRepository, PrismaQualityStandardRepository } from "./modules/quality/quality.repository";
 
 async function main() {
   initSentry();
@@ -29,6 +30,8 @@ async function main() {
   const fpoMembershipRepository = new PrismaFpoMembershipRepository(prisma);
   const aggregationGroupRepository = new PrismaAggregationGroupRepository(prisma);
   const cropLotRepository = new PrismaCropLotRepository(prisma);
+  const qualityRepository = new PrismaQualityRepository(prisma);
+  const qualityStandardRepository = new PrismaQualityStandardRepository(prisma);
 
   const app = createApp({
     authRepository,
@@ -43,6 +46,8 @@ async function main() {
     fpoMembershipRepository,
     aggregationGroupRepository,
     cropLotRepository,
+    qualityRepository,
+    qualityStandardRepository,
   });
 
   await prisma.$connect();

@@ -10,8 +10,10 @@ import { InMemoryFpoAdminRepository } from "./inMemoryFpoAdminRepository";
 import { InMemoryFpoMembershipRepository } from "./inMemoryFpoMembershipRepository";
 import { InMemoryAggregationGroupRepository } from "./inMemoryAggregationGroupRepository";
 import { InMemoryCropLotRepository } from "./inMemoryCropLotRepository";
+import { InMemoryQualityRepository, InMemoryQualityStandardRepository } from "./inMemoryQualityRepository";
+import { QualityAIProvider } from "../../src/modules/quality/ai/quality-ai.provider";
 
-export function buildTestApp() {
+export function buildTestApp(overrides: { qualityAiProvider?: QualityAIProvider } = {}) {
   const authRepository = new InMemoryAuthRepository();
   const auditService = new FakeAuditService();
 
@@ -41,6 +43,12 @@ export function buildTestApp() {
   // above (crop/farm/fpo) the same way InMemoryAggregationGroupRepository
   // joins against reference data.
   const cropLotRepository = new InMemoryCropLotRepository(referenceDataRepository, farmsRepository, fpoRepository);
+
+  // Module 5 — Quality Grading & Produce Assessment. Joins against the
+  // Module 4 fake above (crop/farm/fpo already resolved there) the same
+  // way it joins against reference data above.
+  const qualityRepository = new InMemoryQualityRepository(cropLotRepository);
+  const qualityStandardRepository = new InMemoryQualityStandardRepository();
 
   // The admin listing route is the only thing that touches `prisma`
   // directly (see modules/users/users.routes.ts) — a minimal fake is
@@ -74,6 +82,9 @@ export function buildTestApp() {
     fpoMembershipRepository,
     aggregationGroupRepository,
     cropLotRepository,
+    qualityRepository,
+    qualityStandardRepository,
+    qualityAiProvider: overrides.qualityAiProvider,
   });
 
   return {
@@ -89,5 +100,7 @@ export function buildTestApp() {
     fpoMembershipRepository,
     aggregationGroupRepository,
     cropLotRepository,
+    qualityRepository,
+    qualityStandardRepository,
   };
 }

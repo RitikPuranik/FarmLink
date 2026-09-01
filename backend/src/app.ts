@@ -45,6 +45,17 @@ import { LotStatusService } from "./modules/lots/lot-status.service";
 import { LotAuthorizationService } from "./modules/lots/lot.authorization";
 import { LotsService } from "./modules/lots/lots.service";
 import { createFarmerLotsSummaryRouter, createFpoLotsRouter, createLotsRouter } from "./modules/lots/lots.routes";
+import { QualityRepository, QualityStandardRepository } from "./modules/quality/quality.repository";
+import { QualityStatusService } from "./modules/quality/quality-status.service";
+import { QualityGradingService } from "./modules/quality/quality-grading.service";
+import { QualityAuthorizationService } from "./modules/quality/quality.authorization";
+import { QualityAIProvider, UnavailableQualityAIProvider } from "./modules/quality/ai/quality-ai.provider";
+import { QualityService } from "./modules/quality/quality.service";
+import {
+  createFarmerQualitySummaryRouter,
+  createLotQualityRouter,
+  createQualityAssessmentRouter,
+} from "./modules/quality/quality.routes";
 import { env } from "./config/env";
 
 export interface AppDependencies {
@@ -66,6 +77,14 @@ export interface AppDependencies {
   aggregationGroupRepository: AggregationGroupRepository;
   // Module 4 — Crop / Lot Management. Same injection pattern.
   cropLotRepository: CropLotRepository;
+  // Module 5 — Quality Grading & Produce Assessment. Same injection pattern.
+  qualityRepository: QualityRepository;
+  qualityStandardRepository: QualityStandardRepository;
+  // Optional — defaults to the honest-unavailable stub (see
+  // UnavailableQualityAIProvider's own comment) when not supplied.
+  // server.ts leaves this unset; tests can inject a fake "succeeds"/"low
+  // confidence" provider to exercise paths the real default can't reach.
+  qualityAiProvider?: QualityAIProvider;
 }
 
 export function createApp(deps: AppDependencies): Express {
@@ -165,6 +184,26 @@ export function createApp(deps: AppDependencies): Express {
     env.FRONTEND_URL,
   );
 
+  // Module 5 — Quality Grading & Produce Assessment.
+  const qualityStatusService = new QualityStatusService();
+  const qualityGradingService = new QualityGradingService(deps.qualityStandardRepository);
+  const qualityAuthorization = new QualityAuthorizationService(lotAuthorization, fpoAuthorization);
+  // Build spec section 19/21: no real AI vendor is configured in this
+  // codebase — see UnavailableQualityAIProvider's own comment. Swap this
+  // one line for a real provider implementation later without touching
+  // QualityService.
+  const qualityAiProvider = deps.qualityAiProvider ?? new UnavailableQualityAIProvider();
+  const qualityService = new QualityService(
+    deps.qualityRepository,
+    deps.cropLotRepository,
+    farmerProfileResolver,
+    qualityGradingService,
+    qualityStatusService,
+    qualityAuthorization,
+    qualityAiProvider,
+    deps.auditService,
+  );
+
   app.get("/health", (_req, res) => res.status(200).json({ success: true, data: { status: "ok" } }));
 
   app.use("/api/docs", swaggerUi.serve, swaggerUi.setup(swaggerSpec));
@@ -203,6 +242,18 @@ export function createApp(deps: AppDependencies): Express {
   // Mounted at the same /api/fpos prefix as Module 3's own router (fpo.routes.ts)
   // — a second, separate router at the same prefix, not a change to that file.
   app.use("/api/fpos", createFpoLotsRouter(lotsService, deps.authRepository, deps.auditService));
+
+  // Module 5 — Quality Grading & Produce Assessment.
+  // Mounted at the same /api/lots prefix as Module 4's own router, same
+  // reasoning as /api/fpos above — createLotsRouter has no route matching
+  // "quality-assessments"/"quality-summary" as a second path segment, so
+  // Express falls through to this router untouched.
+  app.use("/api/lots", createLotQualityRouter(qualityService, deps.authRepository, deps.auditService));
+  app.use("/api/quality-assessments", createQualityAssessmentRouter(qualityService, deps.authRepository, deps.auditService));
+  app.use(
+    "/api/farmers/me/quality-summary",
+    createFarmerQualitySummaryRouter(qualityService, deps.authRepository, deps.auditService),
+  );
 
   app.use(notFoundHandler);
   app.use(errorHandler);

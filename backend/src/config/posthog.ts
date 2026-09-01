@@ -39,6 +39,12 @@ const ALLOWED_EVENTS = new Set([
   "lot_updated",
   "lot_cancelled",
   "lot_viewed",
+  // Module 5 — Quality Grading & Produce Assessment (build spec section 63)
+  "quality_assessment_created",
+  "quality_images_uploaded",
+  "quality_ai_analysis_started",
+  "quality_ai_analysis_completed",
+  "quality_assessment_verified",
 ]);
 
 // Defense in depth: even if a caller accidentally passes a sensitive key in

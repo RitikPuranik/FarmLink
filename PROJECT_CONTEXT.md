@@ -18,8 +18,9 @@
 2. Module 2 — Farmer & Farm Profile: implemented
 3. Module 3 — FPO Management & Farmer Aggregation: implemented
 4. Module 4 — Crop / Lot Management: implemented
+5. Module 5 — Quality Grading & Produce Assessment: implemented
 
-Next planned business modules include Quality, Market Intelligence, Price Forecasting, Sell-vs-Store, Warehouse, Buyers, Buyer Matching, RFQ/Offers, Net Realization, Logistics, Shipment/Tracking, Delivery, Payment Status, Ledger, Grievance, Notifications, multilingual/voice/offline, Risk, Analytics, Admin/Government, integrations, audit/security/monitoring and AI platform capabilities.
+Next planned business modules include Market Intelligence, Price Forecasting, Sell-vs-Store, Warehouse, Buyers, Buyer Matching, RFQ/Offers, Net Realization, Logistics, Shipment/Tracking, Delivery, Payment Status, Ledger, Grievance, Notifications, multilingual/voice/offline, Risk, Analytics, Admin/Government, integrations, audit/security/monitoring and AI platform capabilities.
 
 ## Backend — Actual Current Stack
 - Express.js 4.x
@@ -51,6 +52,7 @@ Next planned business modules include Quality, Market Intelligence, Price Foreca
 - `modules/reference-data/` — states/districts/talukas/crops/FPOs/languages/irrigation types
 - `modules/fpo/` — Module 3 FPO registration/verification/admins, membership, aggregation, analytics, government summary
 - `modules/lots/` — Module 4 CropLot lifecycle (create/list/get/update/publish/cancel/history), farmer- and FPO-owned lots, quantity normalization, status state machine
+- `modules/quality/` — Module 5 QualityAssessment lifecycle (create/list/get/update/verify), flexible metrics/images/defects, AI provider abstraction (ai/), crop-agnostic grading engine
 - `app.ts` — dependency-injected Express app factory
 - `server.ts` — composition root; only place that constructs the real PrismaClient
 
@@ -114,6 +116,18 @@ Important Module 4 design decisions:
 - The status state machine (DRAFT/AVAILABLE/PARTIALLY_COMMITTED/COMMITTED/STORED/IN_TRANSACTION/DELIVERED/COMPLETED/CANCELLED) is fully defined in `lot-status.service.ts`, but only `publish` (DRAFT->AVAILABLE) and `cancel` (DRAFT/AVAILABLE->CANCELLED) are reachable through a route today — the remaining edges exist for future reservation/warehouse/logistics/delivery/payment modules to reuse.
 - `LotQuantityService` (`reserve`/`release`/`consume`) is a deliberately internal-only foundation — nothing in Module 4 calls it yet, but the "available quantity can never go negative" guarantee is already enforced atomically in the repository (`adjustAvailableQuantity`, a guarded conditional `UPDATE`) for whichever future module wires it up.
 - `LotStatusHistory` is an append-only transition log kept alongside `CropLot.status`, not instead of it.
+
+### Module 5
+- `QualityAssessment`, `QualityMetric`, `QualityImage`, `QualityDefect`, `QualityAIAnalysis`, `QualityStandard`
+
+Important Module 5 design decisions:
+- `QualityAssessment` is never mutated into a "better" version — a farmer's self-report, an AI estimate, and a human/lab verification are always separate, permanent rows (never overwritten), linked by a `supersededByAssessmentId` self-relation when a newer one replaces an older one as the lot's "current" quality data.
+- `QualityMetric`/`QualityDefect` are flexible key-value rows (`metricCode`/`value`/`unit`), never crop-specific columns on `QualityAssessment` itself — a new crop's parameter set needs no migration.
+- `verificationStatus` (SELF_REPORTED/AI_ESTIMATED/VERIFIED/LAB_VERIFIED) is tracked separately from `status` (the workflow state machine) — the former is "how much trust does this data carry", the latter is "where is this assessment in its lifecycle". Creation always starts SELF_REPORTED regardless of who creates it or what grade they claim; only the AI pipeline or the role-gated `/verify` endpoint can move it forward. A lot's own farmer can never verify their own assessment.
+- `QualityAIAnalysis` is one row per AI *attempt* (including retries), not a single mutable "the AI result" field — a retry after a FAILED attempt never destroys the failure record. No real AI vendor is wired into this codebase (no SDK, no credentials); `UnavailableQualityAIProvider` (`modules/quality/ai/`) always reports a typed `AI_ANALYSIS_UNAVAILABLE` failure rather than fabricating a plausible-looking result — a real provider can be dropped in behind the same `QualityAIProvider` interface later without touching `quality.service.ts`.
+- `qualityScore` (0-100, produce condition) and `confidenceScore` (0-1, AI certainty) are deliberately separate columns, never conflated.
+- `QualityStandard` is a crop-agnostic, per-metric grading rule table (crop + grade + metric code + allowed range) — `QualityGradingService` reads whatever rows exist for a lot's crop rather than branching on crop name; a crop with no configured standards simply gets no auto-computed grade.
+- Reuses Module 4's own lot resolution and authorization (`CropLotRepository`, `LotAuthorizationService` via the new `QualityAuthorizationService`) rather than re-deriving farm/FPO ownership a third time.
 
 ## Market Data — Existing Foundation (important for future modules)
 The project has an existing real market-data foundation from the user's previous implementation:

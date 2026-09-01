@@ -515,6 +515,9 @@ model Crop {
   // disappear out from under a historical lot (mirrors FarmerCrop.crop).
   cropLots CropLot[]
 
+  // Module 5 — per-crop grading rules (build spec section 14/48).
+  qualityStandards QualityStandard[]
+
   @@map("crops")
 }
 
@@ -865,6 +868,12 @@ model CropLot {
 
   statusHistory LotStatusHistory[]
 
+  // Module 5 — every quality assessment ever created for this lot,
+  // oldest first by createdAt; never deleted when superseded (build spec
+  // section 31/32/70: historical assessments must survive for future
+  // dispute-resolution modules).
+  qualityAssessments QualityAssessment[]
+
   @@index([farmerId, status])
   @@index([fpoId, status])
   @@index([cropId, status])
@@ -899,4 +908,305 @@ model LotStatusHistory {
   @@index([lotId])
   @@index([createdAt])
   @@map("lot_status_history")
+}
+
+// ---------------------------------------------------------------------------
+// Module 5 — Quality Grading & Produce Assessment
+//
+// Core product principle (build spec section 82): "how good is this lot,
+// and how confidently do we know that?" A farmer's self-report, an AI
+// estimate, an inspector's manual verification and a lab result are never
+// merged into one number — each is its own QualityAssessment row, kept
+// forever (build spec section 31/32/70: quality data must be historical
+// and immutable after verification, for future dispute-resolution
+// modules). AI output is never the source of truth on its own (build spec
+// section 6/72): it starts as AI_ESTIMATED and only becomes VERIFIED
+// through an explicit human verification step.
+// ---------------------------------------------------------------------------
+
+enum QualityAssessmentSource {
+  MANUAL
+  AI
+  LAB
+  HYBRID
+}
+
+// Build spec section 9 plus FAILED (section 21/67 explicitly requires a
+// PROCESSING -> FAILED edge for a failed AI provider call, which the
+// suggested enum in section 9 omitted).
+enum QualityAssessmentStatus {
+  DRAFT
+  PENDING_IMAGES
+  PROCESSING
+  AI_COMPLETED
+  PENDING_REVIEW
+  VERIFIED
+  REJECTED
+  SUPERSEDED
+  FAILED
+}
+
+// Build spec section 10: general grades; crop-specific grading rules live
+// in QualityStandard below rather than in this enum.
+enum QualityGrade {
+  A
+  B
+  C
+  D
+  REJECTED
+}
+
+enum QualityMetricSource {
+  MANUAL
+  AI
+  LAB
+}
+
+enum QualityImageType {
+  OVERVIEW
+  TOP_VIEW
+  SIDE_VIEW
+  CLOSE_UP
+  DEFECT
+  OTHER
+}
+
+// Build spec section 28/49: how much trust a grade carries — never
+// conflated with QualityAssessmentStatus (a status tracks *workflow*
+// position; this tracks *trust level*, and only this is safe to surface to
+// a buyer as "how certain is this").
+enum QualityVerificationStatus {
+  SELF_REPORTED
+  AI_ESTIMATED
+  VERIFIED
+  LAB_VERIFIED
+}
+
+enum QualityDefectSeverity {
+  LOW
+  MEDIUM
+  HIGH
+  CRITICAL
+}
+
+// Build spec section 38: one row per AI attempt (including retries, build
+// spec section 39) rather than one mutable job — see QualityAIAnalysis's
+// own comment.
+enum QualityAIAnalysisStatus {
+  QUEUED
+  PROCESSING
+  COMPLETED
+  FAILED
+}
+
+/**
+ * The record of one assessment event (build spec section 7). A lot can
+ * have many of these over time — see the model-level comment above this
+ * section. `qualityScore` (0-100, produce condition) and `confidenceScore`
+ * (0-1, AI certainty) are deliberately separate columns (build spec
+ * section 46) — a manual/lab assessment has no confidenceScore at all.
+ */
+model QualityAssessment {
+  id       String @id @default(uuid())
+  publicId String @unique @default(uuid())
+
+  lotId String
+
+  // Human-facing reference, e.g. "QA-2026-000001" (build spec section 57)
+  // — server-generated, immutable, never accepted from the client. Mirrors
+  // CropLot.lotNumber (see lots/lot-number.ts) — see quality/assessment-number.ts.
+  assessmentNumber String @unique
+
+  source           QualityAssessmentSource
+  status           QualityAssessmentStatus  @default(DRAFT)
+  verificationStatus QualityVerificationStatus @default(SELF_REPORTED)
+
+  overallGrade    QualityGrade?
+  qualityScore    Decimal? @db.Decimal(5, 2)
+  confidenceScore Decimal? @db.Decimal(4, 3)
+
+  // Who submitted (for MANUAL/HYBRID) or most recently verified this
+  // assessment — informational/audit-trail only, deliberately a plain
+  // column rather than a Prisma relation (build spec section 27's
+  // multi-role actor set — farmer, FPO admin, admin, future inspector —
+  // isn't worth three more User back-relations for a field nothing in
+  // this module joins against).
+  assessedByUserId String?
+  assessedAt       DateTime?
+
+  // Build spec section 33: when a later assessment supersedes this one,
+  // point forward to it. The superseding assessment is never itself
+  // deleted or mutated to "become" this one — both rows persist.
+  supersededByAssessmentId String?            @unique
+  supersededBy             QualityAssessment? @relation("AssessmentSupersession", fields: [supersededByAssessmentId], references: [id], onDelete: SetNull)
+  supersedes               QualityAssessment? @relation("AssessmentSupersession")
+
+  notes String?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  lot        CropLot            @relation(fields: [lotId], references: [id], onDelete: Restrict)
+  metrics    QualityMetric[]
+  images     QualityImage[]
+  defects    QualityDefect[]
+  aiAnalyses QualityAIAnalysis[]
+
+  @@index([lotId, createdAt])
+  @@index([lotId, status])
+  @@index([status])
+  @@index([source])
+  @@index([overallGrade])
+  @@map("quality_assessments")
+}
+
+/**
+ * Flexible per-crop metrics (build spec section 11-13) — never columns
+ * like `moisture`/`damage`/`color` directly on QualityAssessment, so a new
+ * metric for a new crop never needs a migration.
+ */
+model QualityMetric {
+  id           String @id @default(uuid())
+  assessmentId String
+
+  metricCode String
+  metricName String
+
+  value Decimal @db.Decimal(10, 2)
+  unit  String?
+
+  minAllowed Decimal? @db.Decimal(10, 2)
+  maxAllowed Decimal? @db.Decimal(10, 2)
+
+  source QualityMetricSource
+
+  createdAt DateTime @default(now())
+
+  assessment QualityAssessment @relation(fields: [assessmentId], references: [id], onDelete: Cascade)
+
+  @@index([assessmentId])
+  @@index([metricCode])
+  @@map("quality_metrics")
+}
+
+/**
+ * Image metadata only (build spec section 15: "Do not store binary image
+ * data in PostgreSQL"). `storageProvider`/`externalId` are deliberately
+ * generic rather than Cloudinary-specific columns — this codebase has no
+ * Cloudinary (or any) file-storage integration yet (see
+ * images/quality-image.service.ts's own comment on why), so the schema is
+ * written to accept whichever provider is wired in first without another
+ * migration.
+ */
+model QualityImage {
+  id           String @id @default(uuid())
+  assessmentId String
+
+  storageProvider String
+  externalId      String
+  secureUrl       String
+  // Build spec section 41: optional foundation for future same-image
+  // analysis-result caching — not used for any dedup logic yet.
+  checksum        String?
+
+  imageType      QualityImageType @default(OTHER)
+  uploadedByUserId String?
+
+  uploadedAt DateTime @default(now())
+
+  assessment QualityAssessment @relation(fields: [assessmentId], references: [id], onDelete: Cascade)
+
+  @@index([assessmentId])
+  @@map("quality_images")
+}
+
+/**
+ * Build spec section 44-45: defects are their own flexible rows for the
+ * same reason metrics are — never crop-specific columns.
+ */
+model QualityDefect {
+  id           String @id @default(uuid())
+  assessmentId String
+
+  code String
+  name String
+
+  severity QualityDefectSeverity
+
+  affectedPercentage Decimal? @db.Decimal(5, 2)
+  confidence         Decimal? @db.Decimal(4, 3)
+
+  createdAt DateTime @default(now())
+
+  assessment QualityAssessment @relation(fields: [assessmentId], references: [id], onDelete: Cascade)
+
+  @@index([assessmentId])
+  @@map("quality_defects")
+}
+
+/**
+ * One row per AI analysis *attempt* (build spec section 38-39/42-43) —
+ * including retries — rather than a single mutable "the AI result" field,
+ * so a retry after a FAILED attempt never destroys the failure record.
+ * `rawResultJson` only ever holds the sanitized, normalized
+ * QualityAnalysisResult shape (see ai/quality-ai.types.ts) — never a raw
+ * provider payload (build spec section 22/43: "Do not expose
+ * provider-specific raw JSON directly").
+ */
+model QualityAIAnalysis {
+  id           String @id @default(uuid())
+  assessmentId String
+
+  provider     String
+  modelVersion String
+
+  status QualityAIAnalysisStatus @default(QUEUED)
+
+  confidenceScore Decimal? @db.Decimal(4, 3)
+  rawResultJson   Json?
+
+  requestedByUserId String?
+  requestedAt       DateTime  @default(now())
+  processedAt       DateTime?
+
+  errorCode    String?
+  errorMessage String?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  assessment QualityAssessment @relation(fields: [assessmentId], references: [id], onDelete: Cascade)
+
+  @@index([assessmentId, createdAt])
+  @@index([status])
+  @@map("quality_ai_analyses")
+}
+
+/**
+ * Build spec section 14/48: a clean, additive per-crop grading foundation
+ * — deliberately NOT a full rules engine (boolean expressions, AND/OR
+ * trees, etc.), just "for this crop, this grade requires this metric to
+ * fall in this range". QualityGradingService reads these rows to turn a
+ * set of QualityMetric values into a QualityGrade; if no QualityStandard
+ * rows exist for a crop, grading falls back to whatever grade was
+ * supplied directly (manual/AI-suggested) — see that service's comment.
+ */
+model QualityStandard {
+  id     String @id @default(uuid())
+  cropId String
+
+  grade      QualityGrade
+  metricCode String
+
+  minValue Decimal? @db.Decimal(10, 2)
+  maxValue Decimal? @db.Decimal(10, 2)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  crop Crop @relation(fields: [cropId], references: [id], onDelete: Cascade)
+
+  @@unique([cropId, grade, metricCode])
+  @@index([cropId])
+  @@map("quality_standards")
 }
