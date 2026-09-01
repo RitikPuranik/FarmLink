@@ -60,6 +60,8 @@ import { env } from "./config/env";
 import { MarketIntelligenceRepository } from "./modules/market-intelligence/market-intelligence.repository";
 import { MarketIntelligenceService } from "./modules/market-intelligence/market-intelligence.service";
 import { createMarketIntelligenceRouter } from "./modules/market-intelligence/market-intelligence.routes";
+import { BuyerMatchingService } from "./modules/buyer-matching/buyer-matching.service";
+import { createBuyerMatchingRouter } from "./modules/buyer-matching/buyer-matching.routes";
 
 export interface AppDependencies {
   authRepository: AuthRepository;
@@ -215,6 +217,13 @@ export function createApp(deps: AppDependencies): Express {
     farmerProfileResolver,
     deps.auditService,
   );
+  const buyerMatchingService = new BuyerMatchingService(
+    deps.prisma,
+    deps.cropLotRepository,
+    lotAuthorization,
+    farmerProfileResolver,
+    deps.auditService,
+  );
 
   app.get("/health", (_req, res) => res.status(200).json({ success: true, data: { status: "ok" } }));
 
@@ -271,6 +280,7 @@ export function createApp(deps: AppDependencies): Express {
     "/api/market-intelligence",
     createMarketIntelligenceRouter(marketIntelligenceService, deps.authRepository, deps.auditService),
   );
+  app.use("/api", createBuyerMatchingRouter(buyerMatchingService, deps.authRepository, deps.auditService));
 
   app.use(notFoundHandler);
   app.use(errorHandler);

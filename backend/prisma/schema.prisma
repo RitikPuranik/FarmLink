@@ -216,6 +216,7 @@ model User {
   fullName     String
   mobile       String  @unique
   email        String? @unique
+  buyerProfile BuyerProfile?
   passwordHash String
 
   role          UserRole
@@ -521,6 +522,7 @@ model Crop {
   // Module 6 — canonical crop reference reused by imported market data.
   mandiPrices MandiPrice[]
   marketAliases CropAlias[]
+  buyerDemands BuyerDemand[]
 
   @@map("crops")
 }
@@ -877,6 +879,7 @@ model CropLot {
   // section 31/32/70: historical assessments must survive for future
   // dispute-resolution modules).
   qualityAssessments QualityAssessment[]
+  tradeOffers TradeOffer[]
 
   @@index([farmerId, status])
   @@index([fpoId, status])
@@ -1326,4 +1329,119 @@ model MarketDataSyncCheckpoint {
   updatedAt DateTime @updatedAt
 
   @@map("market_data_sync_checkpoints")
+}
+
+// Module 7 — buyer discovery, matching and immutable digital offers.
+enum BuyerBusinessType { PROCESSOR WHOLESALER RETAILER EXPORTER INSTITUTIONAL_BUYER TRADER OTHER }
+enum BuyerVerificationStatus { PENDING VERIFIED REJECTED SUSPENDED }
+enum BuyerDemandStatus { DRAFT ACTIVE PAUSED FULFILLED EXPIRED CANCELLED }
+enum TradeOfferStatus { DRAFT SENT COUNTERED ACCEPTED REJECTED WITHDRAWN EXPIRED CANCELLED }
+
+model BuyerProfile {
+  id String @id @default(uuid())
+  publicId String @unique @default(uuid())
+  userId String @unique
+  organizationName String
+  businessType BuyerBusinessType
+  description String?
+  contactPerson String
+  phone String
+  email String?
+  address String?
+  state String
+  district String
+  latitude Float?
+  longitude Float?
+  website String?
+  verificationStatus BuyerVerificationStatus @default(PENDING)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  user User @relation(fields:[userId], references:[id], onDelete: Cascade)
+  demands BuyerDemand[]
+  buyerOffers TradeOffer[] @relation("OfferBuyer")
+  @@index([verificationStatus])
+  @@index([state, district])
+  @@map("buyer_profiles")
+}
+
+model BuyerDemand {
+  id String @id @default(uuid())
+  publicId String @unique @default(uuid())
+  buyerId String
+  cropId String
+  title String
+  description String?
+  requiredQuantity Decimal @db.Decimal(14,2)
+  minimumQuantity Decimal? @db.Decimal(14,2)
+  quantityUnit QuantityUnit
+  targetPrice Decimal? @db.Decimal(14,2)
+  minimumPrice Decimal? @db.Decimal(14,2)
+  maximumPrice Decimal? @db.Decimal(14,2)
+  qualityRequirements Json?
+  grade QualityGrade?
+  state String
+  district String
+  latitude Float?
+  longitude Float?
+  deliveryLocation String?
+  deliveryStartDate DateTime?
+  deliveryEndDate DateTime?
+  status BuyerDemandStatus @default(DRAFT)
+  committedQuantity Decimal @default(0) @db.Decimal(14,2)
+  expiresAt DateTime?
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  buyer BuyerProfile @relation(fields:[buyerId], references:[id], onDelete: Restrict)
+  crop Crop @relation(fields:[cropId], references:[id], onDelete: Restrict)
+  offers TradeOffer[]
+  @@index([buyerId, status])
+  @@index([cropId, status])
+  @@index([status, expiresAt])
+  @@map("buyer_demands")
+}
+
+model TradeOffer {
+  id String @id @default(uuid())
+  publicId String @unique @default(uuid())
+  lotId String
+  buyerDemandId String?
+  buyerId String
+  sellerId String
+  initiatorId String
+  quantity Decimal @db.Decimal(14,2)
+  quantityUnit QuantityUnit
+  offeredPrice Decimal @db.Decimal(14,2)
+  priceUnit String @default("INR_PER_QUINTAL")
+  totalValue Decimal @db.Decimal(16,2)
+  deliveryTerms String?
+  message String?
+  status TradeOfferStatus @default(DRAFT)
+  expiresAt DateTime?
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  lot CropLot @relation(fields:[lotId], references:[id], onDelete: Restrict)
+  demand BuyerDemand? @relation(fields:[buyerDemandId], references:[id], onDelete: SetNull)
+  buyer BuyerProfile @relation("OfferBuyer", fields:[buyerId], references:[id], onDelete: Restrict)
+  revisions TradeOfferRevision[]
+  @@index([lotId, status])
+  @@index([buyerId, status])
+  @@index([buyerDemandId, status])
+  @@map("trade_offers")
+}
+
+model TradeOfferRevision {
+  id String @id @default(uuid())
+  offerId String
+  revisionNumber Int
+  initiatedBy String
+  quantity Decimal @db.Decimal(14,2)
+  offeredPrice Decimal @db.Decimal(14,2)
+  priceUnit String @default("INR_PER_QUINTAL")
+  deliveryTerms String?
+  message String?
+  createdAt DateTime @default(now())
+  offer TradeOffer @relation(fields:[offerId], references:[id], onDelete: Cascade)
+  @@unique([offerId, revisionNumber])
+  @@index([offerId, createdAt])
+  @@map("trade_offer_revisions")
 }
