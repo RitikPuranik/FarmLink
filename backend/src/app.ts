@@ -57,6 +57,9 @@ import {
   createQualityAssessmentRouter,
 } from "./modules/quality/quality.routes";
 import { env } from "./config/env";
+import { MarketIntelligenceRepository } from "./modules/market-intelligence/market-intelligence.repository";
+import { MarketIntelligenceService } from "./modules/market-intelligence/market-intelligence.service";
+import { createMarketIntelligenceRouter } from "./modules/market-intelligence/market-intelligence.routes";
 
 export interface AppDependencies {
   authRepository: AuthRepository;
@@ -204,6 +207,15 @@ export function createApp(deps: AppDependencies): Express {
     deps.auditService,
   );
 
+  // Module 6 — read-only intelligence over the shared market-data store.
+  const marketIntelligenceService = new MarketIntelligenceService(
+    new MarketIntelligenceRepository(deps.prisma),
+    deps.cropLotRepository,
+    lotAuthorization,
+    farmerProfileResolver,
+    deps.auditService,
+  );
+
   app.get("/health", (_req, res) => res.status(200).json({ success: true, data: { status: "ok" } }));
 
   app.use("/api/docs", swaggerUi.serve, swaggerUi.setup(swaggerSpec));
@@ -253,6 +265,11 @@ export function createApp(deps: AppDependencies): Express {
   app.use(
     "/api/farmers/me/quality-summary",
     createFarmerQualitySummaryRouter(qualityService, deps.authRepository, deps.auditService),
+  );
+
+  app.use(
+    "/api/market-intelligence",
+    createMarketIntelligenceRouter(marketIntelligenceService, deps.authRepository, deps.auditService),
   );
 
   app.use(notFoundHandler);

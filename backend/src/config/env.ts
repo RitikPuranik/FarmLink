@@ -25,6 +25,12 @@ const envSchema = z.object({
   SENTRY_DSN: z.string().optional().default(""),
 
   COOKIE_DOMAIN: z.string().optional().default("localhost"),
+  MARKET_SYNC_ENABLED: z.coerce.boolean().default(false),
+  MARKET_DATA_GOV_API_KEY: z.string().optional().default(""),
+  MARKET_DATA_GOV_RESOURCE_ID: z.string().optional().default(""),
+  MARKET_DATA_GOV_BASE_URL: z.string().url().default("https://api.data.gov.in/resource"),
+  MARKET_DATA_GOV_TIMEOUT_MS: z.coerce.number().int().positive().default(15_000),
+  MARKET_DATA_GOV_PAGE_SIZE: z.coerce.number().int().min(1).max(1_000).default(500),
 });
 
 const parsed = envSchema.safeParse(process.env);

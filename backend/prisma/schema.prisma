@@ -518,6 +518,10 @@ model Crop {
   // Module 5 — per-crop grading rules (build spec section 14/48).
   qualityStandards QualityStandard[]
 
+  // Module 6 — canonical crop reference reused by imported market data.
+  mandiPrices MandiPrice[]
+  marketAliases CropAlias[]
+
   @@map("crops")
 }
 
@@ -998,14 +1002,13 @@ enum QualityAIAnalysisStatus {
   COMPLETED
   FAILED
 }
-
-/**
- * The record of one assessment event (build spec section 7). A lot can
- * have many of these over time — see the model-level comment above this
- * section. `qualityScore` (0-100, produce condition) and `confidenceScore`
- * (0-1, AI certainty) are deliberately separate columns (build spec
- * section 46) — a manual/lab assessment has no confidenceScore at all.
- */
+//
+// The record of one assessment event (build spec section 7). A lot can
+// have many of these over time — see the model-level comment above this
+// section. `qualityScore` (0-100, produce condition) and `confidenceScore`
+// (0-1, AI certainty) are deliberately separate columns (build spec
+// section 46) — a manual/lab assessment has no confidenceScore at all.
+// /
 model QualityAssessment {
   id       String @id @default(uuid())
   publicId String @unique @default(uuid())
@@ -1059,12 +1062,11 @@ model QualityAssessment {
   @@index([overallGrade])
   @@map("quality_assessments")
 }
-
-/**
- * Flexible per-crop metrics (build spec section 11-13) — never columns
- * like `moisture`/`damage`/`color` directly on QualityAssessment, so a new
- * metric for a new crop never needs a migration.
- */
+//
+// Flexible per-crop metrics (build spec section 11-13) — never columns
+// like `moisture`/`damage`/`color` directly on QualityAssessment, so a new
+// metric for a new crop never needs a migration.
+// /
 model QualityMetric {
   id           String @id @default(uuid())
   assessmentId String
@@ -1088,16 +1090,15 @@ model QualityMetric {
   @@index([metricCode])
   @@map("quality_metrics")
 }
-
-/**
- * Image metadata only (build spec section 15: "Do not store binary image
- * data in PostgreSQL"). `storageProvider`/`externalId` are deliberately
- * generic rather than Cloudinary-specific columns — this codebase has no
- * Cloudinary (or any) file-storage integration yet (see
- * images/quality-image.service.ts's own comment on why), so the schema is
- * written to accept whichever provider is wired in first without another
- * migration.
- */
+//
+// Image metadata only (build spec section 15: "Do not store binary image
+// data in PostgreSQL"). `storageProvider`/`externalId` are deliberately
+// generic rather than Cloudinary-specific columns — this codebase has no
+// Cloudinary (or any) file-storage integration yet (see
+// images/quality-image.service.ts's own comment on why), so the schema is
+// written to accept whichever provider is wired in first without another
+// migration.
+// /
 model QualityImage {
   id           String @id @default(uuid())
   assessmentId String
@@ -1119,11 +1120,10 @@ model QualityImage {
   @@index([assessmentId])
   @@map("quality_images")
 }
-
-/**
- * Build spec section 44-45: defects are their own flexible rows for the
- * same reason metrics are — never crop-specific columns.
- */
+//
+// Build spec section 44-45: defects are their own flexible rows for the
+// same reason metrics are — never crop-specific columns.
+// /
 model QualityDefect {
   id           String @id @default(uuid())
   assessmentId String
@@ -1143,16 +1143,15 @@ model QualityDefect {
   @@index([assessmentId])
   @@map("quality_defects")
 }
-
-/**
- * One row per AI analysis *attempt* (build spec section 38-39/42-43) —
- * including retries — rather than a single mutable "the AI result" field,
- * so a retry after a FAILED attempt never destroys the failure record.
- * `rawResultJson` only ever holds the sanitized, normalized
- * QualityAnalysisResult shape (see ai/quality-ai.types.ts) — never a raw
- * provider payload (build spec section 22/43: "Do not expose
- * provider-specific raw JSON directly").
- */
+//
+// One row per AI analysis *attempt* (build spec section 38-39/42-43) —
+// including retries — rather than a single mutable "the AI result" field,
+// so a retry after a FAILED attempt never destroys the failure record.
+// `rawResultJson` only ever holds the sanitized, normalized
+// QualityAnalysisResult shape (see ai/quality-ai.types.ts) — never a raw
+// provider payload (build spec section 22/43: "Do not expose
+// provider-specific raw JSON directly").
+// /
 model QualityAIAnalysis {
   id           String @id @default(uuid())
   assessmentId String
@@ -1181,16 +1180,15 @@ model QualityAIAnalysis {
   @@index([status])
   @@map("quality_ai_analyses")
 }
-
-/**
- * Build spec section 14/48: a clean, additive per-crop grading foundation
- * — deliberately NOT a full rules engine (boolean expressions, AND/OR
- * trees, etc.), just "for this crop, this grade requires this metric to
- * fall in this range". QualityGradingService reads these rows to turn a
- * set of QualityMetric values into a QualityGrade; if no QualityStandard
- * rows exist for a crop, grading falls back to whatever grade was
- * supplied directly (manual/AI-suggested) — see that service's comment.
- */
+//
+// Build spec section 14/48: a clean, additive per-crop grading foundation
+// — deliberately NOT a full rules engine (boolean expressions, AND/OR
+// trees, etc.), just "for this crop, this grade requires this metric to
+// fall in this range". QualityGradingService reads these rows to turn a
+// set of QualityMetric values into a QualityGrade; if no QualityStandard
+// rows exist for a crop, grading falls back to whatever grade was
+// supplied directly (manual/AI-suggested) — see that service's comment.
+// /
 model QualityStandard {
   id     String @id @default(uuid())
   cropId String
@@ -1209,4 +1207,123 @@ model QualityStandard {
   @@unique([cropId, grade, metricCode])
   @@index([cropId])
   @@map("quality_standards")
+}
+
+// ---------------------------------------------------------------------------
+// Module 6 — Market data & price discovery
+// ---------------------------------------------------------------------------
+
+enum MarketImportOperation {
+  HISTORICAL_IMPORT
+  INCREMENTAL_SYNC
+}
+
+enum MarketImportStatus {
+  RUNNING
+  SUCCEEDED
+  PARTIAL_SUCCESS
+  FAILED
+  SKIPPED
+}
+
+// A source market. Location is deliberately optional: it is never guessed.
+model Mandi {
+  id String @id @default(uuid())
+
+  source       String
+  sourceMarketId String?
+  name         String
+  normalizedName String
+  state        String
+  district     String
+  latitude     Float?
+  longitude    Float?
+  sourceMetadata Json?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  prices MandiPrice[]
+
+  @@unique([source, sourceMarketId])
+  @@unique([source, normalizedName, district, state])
+  @@index([state, district])
+  @@index([latitude, longitude])
+  @@map("mandis")
+}
+
+// Canonical, date-wise historical price data. Monetary values are INR/QTL.
+model MandiPrice {
+  id String @id @default(uuid())
+  cropId String
+  mandiId String
+  source String
+  sourceRecordId String?
+  observedDate DateTime @db.Date
+
+  minPrice Decimal @db.Decimal(14, 2)
+  maxPrice Decimal @db.Decimal(14, 2)
+  modalPrice Decimal @db.Decimal(14, 2)
+  arrivalQuantity Decimal? @db.Decimal(14, 2)
+  arrivalUnit QuantityUnit?
+  sourceMetadata Json?
+  retrievedAt DateTime @default(now())
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  crop Crop @relation(fields: [cropId], references: [id], onDelete: Restrict)
+  mandi Mandi @relation(fields: [mandiId], references: [id], onDelete: Restrict)
+
+  @@unique([cropId, mandiId, observedDate, source])
+  @@unique([source, sourceRecordId])
+  @@index([cropId, observedDate])
+  @@index([mandiId, observedDate])
+  @@index([cropId, mandiId, observedDate])
+  @@map("mandi_prices")
+}
+
+// Explicit aliases prevent an importer from inventing a Crop record.
+model CropAlias {
+  id String @id @default(uuid())
+  cropId String
+  source String
+  alias String
+  normalizedAlias String
+  createdAt DateTime @default(now())
+
+  crop Crop @relation(fields: [cropId], references: [id], onDelete: Cascade)
+
+  @@unique([source, normalizedAlias])
+  @@index([cropId])
+  @@map("crop_aliases")
+}
+
+// Durable, non-sensitive operational record for import and sync attempts.
+model MarketDataImportRun {
+  id String @id @default(uuid())
+  source String
+  operation MarketImportOperation
+  status MarketImportStatus @default(RUNNING)
+  recordsRead Int @default(0)
+  recordsImported Int @default(0)
+  recordsRejected Int @default(0)
+  partialFailures Int @default(0)
+  diagnostics Json?
+  startedAt DateTime @default(now())
+  completedAt DateTime?
+  createdAt DateTime @default(now())
+
+  @@index([source, operation, startedAt])
+  @@map("market_data_import_runs")
+}
+
+// Progress is advanced only after a page/range was persisted successfully.
+model MarketDataSyncCheckpoint {
+  id String @id @default(uuid())
+  source String @unique
+  lastSuccessfulObservedDate DateTime? @db.Date
+  cursor String?
+  updatedAt DateTime @updatedAt
+
+  @@map("market_data_sync_checkpoints")
 }

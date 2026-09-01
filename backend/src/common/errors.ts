@@ -7,6 +7,14 @@ export type ErrorCode =
   | "CONFLICT"
   | "RATE_LIMITED"
   | "DATABASE_ERROR"
+  | "CROP_NOT_FOUND"
+  | "MANDI_NOT_FOUND"
+  | "INSUFFICIENT_MARKET_DATA"
+  | "INVALID_LOCATION"
+  | "LOCATION_REQUIRED"
+  | "NO_NEARBY_MARKETS_FOUND"
+  | "INVALID_DATE_RANGE"
+  | "UNSUPPORTED_UNIT"
   | "UNEXPECTED_ERROR";
 
 export class AppError extends Error {
@@ -74,5 +82,15 @@ export class RateLimitError extends AppError {
 export class DatabaseError extends AppError {
   constructor(message = "A database error occurred.") {
     super(message, 500, "DATABASE_ERROR");
+  }
+}
+
+export class MarketDomainError extends AppError {
+  constructor(
+    message: string,
+    code: Extract<ErrorCode, "CROP_NOT_FOUND" | "MANDI_NOT_FOUND" | "INSUFFICIENT_MARKET_DATA" | "INVALID_LOCATION" | "LOCATION_REQUIRED" | "NO_NEARBY_MARKETS_FOUND" | "INVALID_DATE_RANGE" | "UNSUPPORTED_UNIT">,
+    statusCode = 422,
+  ) {
+    super(message, statusCode, code);
   }
 }
