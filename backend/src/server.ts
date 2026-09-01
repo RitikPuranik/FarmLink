@@ -1,7 +1,7 @@
 import { createApp } from "./app";
 import { env } from "./config/env";
 import { logger } from "./config/logger";
-import { initSentry } from "./config/sentry";
+import { captureException, initSentry } from "./config/sentry";
 import { prisma } from "./config/prisma";
 import { PrismaAuthRepository } from "./modules/auth/auth.repository";
 import { PrismaAuditService } from "./modules/audit/audit.service";
@@ -68,9 +68,10 @@ async function main() {
         const sevenDaysAgo = new Date(); sevenDaysAgo.setUTCDate(sevenDaysAgo.getUTCDate() - 7);
         const from = checkpoint?.lastSuccessfulObservedDate && checkpoint.lastSuccessfulObservedDate > sevenDaysAgo ? checkpoint.lastSuccessfulObservedDate : sevenDaysAgo;
         const result = await new MarketDataService(prisma).run(provider.records(from), "data.gov.in", "INCREMENTAL_SYNC");
-        if (result.imported) await prisma.marketDataSyncCheckpoint.upsert({ where: { source: "data.gov.in" }, create: { source: "data.gov.in", lastSuccessfulObservedDate: new Date() }, update: { lastSuccessfulObservedDate: new Date() } });
+        if (result.newestObservedDate) await prisma.marketDataSyncCheckpoint.upsert({ where: { source: "data.gov.in" }, create: { source: "data.gov.in", lastSuccessfulObservedDate: result.newestObservedDate, lastSuccessfulSyncAt: new Date() }, update: { lastSuccessfulObservedDate: result.newestObservedDate, lastSuccessfulSyncAt: new Date() } });
+        await auditService.record({ action: "MARKET_DATA_SYNCED", entityType: "MarketDataImportRun", entityId: result.runId, metadata: { imported: result.imported, rejected: result.rejected } });
         logger.info({ result }, "Market data sync completed");
-      } catch (err) { logger.error({ err }, "Market data sync failed"); }
+      } catch (err) { captureException(err, { module: "market_intelligence", operation: "sync" }); logger.error({ err }, "Market data sync failed"); }
       finally { if (redis && await redis.get(lockKey) === token) await redis.del(lockKey); }
     }, { timezone: "Asia/Kolkata" });
     logger.info("Market data sync scheduled for 02:00 Asia/Kolkata");

@@ -31,6 +31,8 @@ const envSchema = z.object({
   MARKET_DATA_GOV_BASE_URL: z.string().url().default("https://api.data.gov.in/resource"),
   MARKET_DATA_GOV_TIMEOUT_MS: z.coerce.number().int().positive().default(15_000),
   MARKET_DATA_GOV_PAGE_SIZE: z.coerce.number().int().min(1).max(1_000).default(500),
+  MARKET_DATA_GOV_MAX_RETRIES: z.coerce.number().int().min(0).max(5).default(3),
+  MARKET_DATA_GOV_RATE_LIMIT_MS: z.coerce.number().int().min(0).max(60_000).default(250),
 });
 
 const parsed = envSchema.safeParse(process.env);

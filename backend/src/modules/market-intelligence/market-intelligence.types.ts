@@ -11,7 +11,7 @@ export const MARKET_CONFIG = {
 
 export interface PricePoint { date: Date; modalPrice: number; minPrice: number; maxPrice: number; arrivalQuantity: number | null; }
 export interface MarketCandidate {
-  mandi: { id: string; name: string; district: string; state: string; latitude: number | null; longitude: number | null };
+  mandi: { id: string; publicId: string; name: string; district: string; state: string; latitude: number | null; longitude: number | null };
   latest: PricePoint;
   history: PricePoint[];
   distanceKm?: number;

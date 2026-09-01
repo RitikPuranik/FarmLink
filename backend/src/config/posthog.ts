@@ -45,6 +45,22 @@ const ALLOWED_EVENTS = new Set([
   "quality_ai_analysis_started",
   "quality_ai_analysis_completed",
   "quality_assessment_verified",
+  // Modules 6–7 events never include precise coordinates, contacts, or messages.
+  "market_snapshot_viewed",
+  "market_trends_viewed",
+  "market_comparison_viewed",
+  "nearby_market_search",
+  "market_recommendation_generated",
+  "buyer_profile_created",
+  "buyer_verified",
+  "buyer_demand_created",
+  "buyer_demand_activated",
+  "buyer_demand_paused",
+  "lot_matches_viewed",
+  "trade_offer_sent",
+  "trade_offer_countered",
+  "trade_offer_accepted",
+  "trade_offer_rejected",
 ]);
 
 // Defense in depth: even if a caller accidentally passes a sensitive key in

@@ -1,4 +1,4 @@
-import { PrismaClient } from "@prisma/client";
+import { Prisma, PrismaClient } from "@prisma/client";
 
 export type AuditAction =
   | "USER_REGISTERED"
@@ -61,7 +61,27 @@ export type AuditAction =
   | "QUALITY_AI_ANALYSIS_COMPLETED"
   | "QUALITY_AI_ANALYSIS_FAILED"
   | "QUALITY_ASSESSMENT_VERIFIED"
-  | "QUALITY_ASSESSMENT_SUPERSEDED";
+  | "QUALITY_ASSESSMENT_SUPERSEDED"
+  // Module 6 — Market intelligence operations that materially affect an
+  // actor or data pipeline (routine chart reads are intentionally absent).
+  | "MARKET_DATA_IMPORTED"
+  | "MARKET_DATA_SYNCED"
+  | "MARKET_RECOMMENDATION_GENERATED"
+  // Module 7 — buyer verification, demand lifecycle and negotiations.
+  | "BUYER_PROFILE_CREATED"
+  | "BUYER_VERIFIED"
+  | "BUYER_REJECTED"
+  | "BUYER_SUSPENDED"
+  | "BUYER_DEMAND_CREATED"
+  | "BUYER_DEMAND_ACTIVATED"
+  | "BUYER_DEMAND_PAUSED"
+  | "BUYER_DEMAND_CANCELLED"
+  | "TRADE_OFFER_SENT"
+  | "TRADE_OFFER_COUNTERED"
+  | "TRADE_OFFER_ACCEPTED"
+  | "TRADE_OFFER_REJECTED"
+  | "TRADE_OFFER_WITHDRAWN"
+  | "TRADE_OFFER_QUANTITY_COMMITTED";
 
 export interface AuditEvent {
   actorUserId?: string | null;
@@ -105,7 +125,7 @@ export class PrismaAuditService implements AuditService {
         action: event.action,
         entityType: event.entityType,
         entityId: event.entityId ?? null,
-        metadata: sanitizeMetadata(event.metadata),
+        metadata: sanitizeMetadata(event.metadata) as Prisma.InputJsonValue | undefined,
         ipAddress: event.ipAddress,
         userAgent: event.userAgent,
       },

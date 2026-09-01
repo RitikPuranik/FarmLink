@@ -1,7 +1,7 @@
-import { CropLot } from "@prisma/client";
 import { AuthenticatedUserContext } from "../auth/auth.types";
 import { FpoAuthorizationService } from "../fpo/fpo.authorization";
 import { LotAuthorizationService } from "../lots/lot.authorization";
+import { CropLotWithRelations } from "../lots/lots.types";
 
 /**
  * Build spec section 56 (authorization matrix), reusing Module 4's own
@@ -25,7 +25,7 @@ export class QualityAuthorizationService {
 
   /** Create a self-assessment, upload/remove images, run AI, view — the
    * same set of people who can already view/manage the lot itself. */
-  async canAccessLot(user: AuthenticatedUserContext, lot: CropLot, callerFarmerProfileId: string | null): Promise<boolean> {
+  async canAccessLot(user: AuthenticatedUserContext, lot: CropLotWithRelations, callerFarmerProfileId: string | null): Promise<boolean> {
     return this.lotAuthorization.canViewLot(user, lot, callerFarmerProfileId);
   }
 
@@ -39,7 +39,7 @@ export class QualityAuthorizationService {
    * verified by an ADMIN today, since there is no inspector role yet to
    * lean on.
    */
-  async canVerify(user: AuthenticatedUserContext, lot: CropLot): Promise<boolean> {
+  async canVerify(user: AuthenticatedUserContext, lot: CropLotWithRelations): Promise<boolean> {
     if (user.role === "ADMIN") return true;
     if (lot.ownerType === "FPO" && lot.fpoId) return this.fpoAuthorization.canManageFpo(user, lot.fpoId);
     return false;

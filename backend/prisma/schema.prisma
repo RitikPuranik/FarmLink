@@ -1232,6 +1232,7 @@ enum MarketImportStatus {
 // A source market. Location is deliberately optional: it is never guessed.
 model Mandi {
   id String @id @default(uuid())
+  publicId String @unique @default(uuid())
 
   source       String
   sourceMarketId String?
@@ -1309,9 +1310,13 @@ model MarketDataImportRun {
   status MarketImportStatus @default(RUNNING)
   recordsRead Int @default(0)
   recordsImported Int @default(0)
+  recordsUpdated Int @default(0)
+  recordsSkipped Int @default(0)
   recordsRejected Int @default(0)
+  validationFailures Int @default(0)
   partialFailures Int @default(0)
   diagnostics Json?
+  metadata Json?
   startedAt DateTime @default(now())
   completedAt DateTime?
   createdAt DateTime @default(now())
@@ -1326,16 +1331,50 @@ model MarketDataSyncCheckpoint {
   source String @unique
   lastSuccessfulObservedDate DateTime? @db.Date
   cursor String?
+  metadata Json?
+  lastSuccessfulSyncAt DateTime?
   updatedAt DateTime @updatedAt
 
   @@map("market_data_sync_checkpoints")
 }
 
 // Module 7 — buyer discovery, matching and immutable digital offers.
-enum BuyerBusinessType { PROCESSOR WHOLESALER RETAILER EXPORTER INSTITUTIONAL_BUYER TRADER OTHER }
-enum BuyerVerificationStatus { PENDING VERIFIED REJECTED SUSPENDED }
-enum BuyerDemandStatus { DRAFT ACTIVE PAUSED FULFILLED EXPIRED CANCELLED }
-enum TradeOfferStatus { DRAFT SENT COUNTERED ACCEPTED REJECTED WITHDRAWN EXPIRED CANCELLED }
+enum BuyerBusinessType {
+  PROCESSOR
+  WHOLESALER
+  RETAILER
+  EXPORTER
+  INSTITUTIONAL_BUYER
+  TRADER
+  OTHER
+}
+
+enum BuyerVerificationStatus {
+  PENDING
+  VERIFIED
+  REJECTED
+  SUSPENDED
+}
+
+enum BuyerDemandStatus {
+  DRAFT
+  ACTIVE
+  PAUSED
+  FULFILLED
+  EXPIRED
+  CANCELLED
+}
+
+enum TradeOfferStatus {
+  DRAFT
+  SENT
+  COUNTERED
+  ACCEPTED
+  REJECTED
+  WITHDRAWN
+  EXPIRED
+  CANCELLED
+}
 
 model BuyerProfile {
   id String @id @default(uuid())
