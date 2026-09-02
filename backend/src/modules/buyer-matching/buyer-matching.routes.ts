@@ -48,7 +48,7 @@ export function createBuyerMatchingRouter(service: BuyerMatchingService, authRep
 
   router.post("/buyer-demands", requireRole("BUYER"), validateBody(demandBody), asyncHandler(async (req, res) => sendSuccess(res, await service.createDemand(req.user!, req.body), "Buyer demand created.", 201)));
   router.get("/buyer-demands", requireRole("BUYER"), asyncHandler(async (req, res) => sendSuccess(res, await service.demands(req.user!), "Buyer demands retrieved.")));
-  router.get("/buyer-demands/:publicId", requireRole("BUYER"), validateParams(publicIdParams), asyncHandler(async (req, res) => sendSuccess(res, await service.demand(req.user!, req.params.publicId), "Buyer demand retrieved.")));
+  router.get("/buyer-demands/:publicId", requireAnyRole("BUYER", "ADMIN"), validateParams(publicIdParams), asyncHandler(async (req, res) => sendSuccess(res, await service.demand(req.user!, req.params.publicId), "Buyer demand retrieved.")));
   router.patch("/buyer-demands/:publicId", requireRole("BUYER"), validateParams(publicIdParams), validateBody(demandUpdateBody), asyncHandler(async (req, res) => sendSuccess(res, await service.updateDemand(req.user!, req.params.publicId, req.body), "Buyer demand updated.")));
   for (const [path, status] of [["activate", "ACTIVE"], ["pause", "PAUSED"], ["cancel", "CANCELLED"]] as const) router.post(`/buyer-demands/:publicId/${path}`, requireRole("BUYER"), validateParams(publicIdParams), asyncHandler(async (req, res) => sendSuccess(res, await service.transitionDemand(req.user!, req.params.publicId, status), `Buyer demand ${path}d.`)));
 

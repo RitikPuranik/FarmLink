@@ -66,6 +66,7 @@ export type AuditAction =
   // actor or data pipeline (routine chart reads are intentionally absent).
   | "MARKET_DATA_IMPORTED"
   | "MARKET_DATA_SYNCED"
+  | "MARKET_DATA_SYNC_GAP_DETECTED"
   | "MARKET_RECOMMENDATION_GENERATED"
   // Module 7 — buyer verification, demand lifecycle and negotiations.
   | "BUYER_PROFILE_CREATED"

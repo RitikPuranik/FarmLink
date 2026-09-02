@@ -16,6 +16,7 @@
     "test": "cross-env NODE_ENV=test jest --runInBand",
     "test:unit": "cross-env NODE_ENV=test jest --runInBand tests/unit",
     "test:integration": "cross-env NODE_ENV=test jest --runInBand tests/integration",
+    "test:db": "cross-env NODE_ENV=test jest --runInBand --testPathIgnorePatterns=/node_modules/ tests/integration/.*\\.db\\.test\\.ts",
     "typecheck": "tsc --noEmit -p tsconfig.json",
     "lint": "eslint src --ext .ts"
   },

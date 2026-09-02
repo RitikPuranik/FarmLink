@@ -4,11 +4,23 @@ import { invalidateMarketCache } from "../market-intelligence/market-cache";
 
 export interface SourceMarketRecord { source: string; sourceRecordId?: string; observedDate: Date; commodity: string; marketId?: string; mandiName: string; state: string; district: string; minPrice: number; maxPrice: number; modalPrice: number; priceUnit: string; arrivals?: number | null; arrivalUnit?: QuantityUnit | null; latitude?: number | null; longitude?: number | null; metadata?: Prisma.InputJsonValue; }
 export const normalizeName = (v: string) => v.trim().toLowerCase().replace(/\s+/g, " ");
-export function toInrPerQuintal(value: number, unit: string) { const u=normalizeName(unit).replace(/₹|inr/g, "").replace(/\s/g, ""); if (!Number.isFinite(value) || value < 0) throw new MarketDomainError("Invalid price.", "MARKET_DATA_PROVIDER_ERROR"); if (["quintal","qtl","100kg","perquintal"].includes(u)) return value; if (["kg","perkg"].includes(u)) return value*100; throw new MarketDomainError(`Unsupported price unit: ${unit}.`, "UNSUPPORTED_UNIT"); }
+export function toInrPerQuintal(value: number, unit: string) { const u=normalizeName(unit).replace(/₹|inr|rs\.?/g, "").replace(/[\s/.]/g, ""); if (!Number.isFinite(value) || value < 0) throw new MarketDomainError("Invalid price.", "MARKET_DATA_PROVIDER_ERROR"); if (["quintal","qtl","100kg","perquintal"].includes(u)) return value; if (["kg","perkg"].includes(u)) return value*100; throw new MarketDomainError(`Unsupported price unit: ${unit}.`, "UNSUPPORTED_UNIT"); }
 
 export class MarketDataService {
   constructor(private readonly prisma: PrismaClient) {}
-  async resolveCrop(source: string, commodity: string) { const normalized=normalizeName(commodity); return this.prisma.crop.findFirst({ where: { OR: [{ name: { equals: commodity, mode:"insensitive" } }, { marketAliases: { some: { source, normalizedAlias: normalized } } }] }, select:{id:true} }); }
+  async resolveCrop(source: string, commodity: string) {
+    const normalized = normalizeName(commodity);
+    // Exact canonical name and source-specific alias are resolved as two
+    // separate lookups (not one combined findFirst) so a row that matches
+    // BOTH — but to two different crops — is detected as ambiguous instead
+    // of silently picking whichever one the DB happened to return first.
+    const [byName, byAlias] = await Promise.all([
+      this.prisma.crop.findFirst({ where: { name: { equals: commodity, mode: "insensitive" } }, select: { id: true } }),
+      this.prisma.crop.findFirst({ where: { marketAliases: { some: { source, normalizedAlias: normalized } } }, select: { id: true } }),
+    ]);
+    if (byName && byAlias && byName.id !== byAlias.id) return "AMBIGUOUS" as const;
+    return byName ?? byAlias;
+  }
   async persist(record: SourceMarketRecord, client: PrismaClient | Prisma.TransactionClient = this.prisma) {
     if (!(record.observedDate instanceof Date) || Number.isNaN(record.observedDate.getTime())) throw new MarketDomainError("Invalid observed date.", "INVALID_DATE");
     if (!record.commodity.trim()) throw new MarketDomainError("Crop name is required.", "UNKNOWN_CROP");
@@ -19,7 +31,18 @@ export class MarketDataService {
     const hasLatitude = record.latitude !== undefined && record.latitude !== null;
     const hasLongitude = record.longitude !== undefined && record.longitude !== null;
     if (hasLatitude !== hasLongitude || (hasLatitude && (Math.abs(record.latitude as number) > 90 || Math.abs(record.longitude as number) > 180))) throw new MarketDomainError("Invalid market coordinates.", "INVALID_LOCATION");
-    const normalized=normalizeName(record.commodity);const crop=await client.crop.findFirst({ where: { OR: [{ name: { equals: record.commodity, mode:"insensitive" } }, { marketAliases: { some: { source:record.source, normalizedAlias: normalized } } }] }, select:{id:true} }); if (!crop) return { imported:false, reason:"UNKNOWN_CROP" as const };
+    const normalized=normalizeName(record.commodity);
+    // Same two-lookup ambiguity check as resolveCrop() above — done inline
+    // here (rather than calling resolveCrop) so it runs against `client`,
+    // which is the transaction handle during a chunked import, not the
+    // outer PrismaClient.
+    const [byName,byAlias]=await Promise.all([
+      client.crop.findFirst({ where:{ name:{ equals: record.commodity, mode:"insensitive" } }, select:{id:true} }),
+      client.crop.findFirst({ where:{ marketAliases:{ some:{ source:record.source, normalizedAlias: normalized } } }, select:{id:true} }),
+    ]);
+    if (byName && byAlias && byName.id !== byAlias.id) return { imported:false, reason:"AMBIGUOUS_CROP" as const };
+    const crop = byName ?? byAlias;
+    if (!crop) return { imported:false, reason:"UNKNOWN_CROP" as const };
     const normalizedName=normalizeName(record.mandiName); const mandi = record.marketId ? await client.mandi.upsert({ where:{ source_sourceMarketId:{source:record.source,sourceMarketId:record.marketId} }, create:{source:record.source,sourceMarketId:record.marketId,name:record.mandiName,normalizedName,state:record.state,district:record.district,latitude:record.latitude ?? null,longitude:record.longitude ?? null}, update:{name:record.mandiName,state:record.state,district:record.district,latitude:record.latitude ?? undefined,longitude:record.longitude ?? undefined} }) : await client.mandi.upsert({ where:{ source_normalizedName_district_state:{source:record.source,normalizedName,district:record.district,state:record.state} }, create:{source:record.source,name:record.mandiName,normalizedName,state:record.state,district:record.district,latitude:record.latitude ?? null,longitude:record.longitude ?? null}, update:{name:record.mandiName} });
     const [minPrice,maxPrice,modalPrice]=[record.minPrice,record.maxPrice,record.modalPrice].map(v=>toInrPerQuintal(v,record.priceUnit));
     const create={cropId:crop.id,mandiId:mandi.id,source:record.source,sourceRecordId:record.sourceRecordId ?? null,observedDate:record.observedDate,minPrice,maxPrice,modalPrice,arrivalQuantity:record.arrivals ?? null,arrivalUnit:record.arrivalUnit ?? null,sourceMetadata:record.metadata}; const update={minPrice,maxPrice,modalPrice,arrivalQuantity:record.arrivals ?? null,arrivalUnit:record.arrivalUnit ?? null,sourceMetadata:record.metadata,retrievedAt:new Date()};
