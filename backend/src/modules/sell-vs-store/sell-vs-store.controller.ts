@@ -5,6 +5,7 @@ import { FarmerProfileResolver } from "../farmers/farmer-profile.resolver";
 import { CropLotRepository } from "../lots/lots.repository";
 import { LotAuthorizationService } from "../lots/lot.authorization";
 import { SellStoreOrchestrationService } from "./sell-store-orchestration.service";
+import { trackEvent } from "../../config/posthog";
 
 /**
  * Controller for Sell vs Store API endpoints.
@@ -45,7 +46,10 @@ export class SellStoreController {
 
     await this.ensureAuthorizedForLot(user, lotPublicId);
 
+    trackEvent("decision_engine_started", user.id, { lotPublicId });
     const decision = await this.orchestrator.generateDecision(lotPublicId, user.id);
+    trackEvent("decision_engine_completed", user.id, { lotPublicId, result: decision.result });
+
     res.json({ success: true, data: decision });
   };
 
@@ -55,6 +59,7 @@ export class SellStoreController {
 
     await this.ensureAuthorizedForLot(user, lotPublicId);
 
+    trackEvent("lot_history_viewed", user.id, { lotPublicId, module: "sell_vs_store" });
     const decisions = await this.orchestrator.getDecisionsForLot(lotPublicId);
     res.json({ success: true, data: decisions });
   };
@@ -79,6 +84,7 @@ export class SellStoreController {
       throw new NotFoundError("Decision not found."); // Obfuscate unauthorized access
     }
 
+    trackEvent("historical_decision_viewed", user.id, { lotPublicId: lot.publicId, decisionPublicId: publicId });
     res.json({ success: true, data: decision });
   };
 }

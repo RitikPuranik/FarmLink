@@ -1,4 +1,4 @@
-# FarmLink Intelligence — Modules 1, 2, 3, 4 & 5
+# FarmLink Intelligence — Modules 1–8
 
 **SIH26132** — Strengthening market linkages and price discovery for farmers.
 
@@ -41,12 +41,31 @@ This repository currently contains:
   result (no AI vendor is wired into this codebase). No frontend/e2e work
   was in scope for Module 5 either — see `backend/README.md` for the full
   write-up.
+- **Module 6 (backend only)** — Market Intelligence & Price Discovery.
+  Read-only intelligence over the shared market data store: crop price
+  analytics (average, min, max, volatility), geographic market context
+  resolution (district → state → national fallback), market data freshness
+  tracking (FRESH/RECENT/STALE/OUTDATED), and lot-scoped price benchmarks.
+  Reuses Module 4's lot authorization and Module 2's farmer profile
+  resolution. No frontend/e2e work was in scope.
+- **Module 7 (backend only)** — Buyer Management & Matching. Buyer
+  profiles, demand lifecycle (active/paused/fulfilled/expired with lazy
+  expiration), deterministic buyer↔lot matching with quality/location
+  scoring, offer management with a full state machine
+  (PENDING→ACCEPTED/REJECTED/EXPIRED/WITHDRAWN/COUNTERED), concurrent
+  quantity reservation with atomic guards, and demand quantity validation
+  (requiredQuantity can never drop below committedQuantity). No
+  frontend/e2e work was in scope.
+- **Module 8 (backend only)** — Sell vs Store Decision Engine. A
+  deterministic, rule-based engine that evaluates whether a farmer should
+  sell now or store a crop lot — NO AI, NO LLM, NO forecasting models.
+  Integrates market intelligence (Module 6), quality data (Module 5), and
+  storage context to produce SELL_NOW / STORE / INSUFFICIENT_DATA
+  decisions with confidence scores, full explainability metadata
+  (factors used, scores, engine version), and immutable historical
+  snapshots. Exposed via authenticated APIs with lot-scoped authorization.
 
-Market intelligence, price forecasting, sell-vs-store, warehouse, buyer
-management/matching, offers/RFQ, and logistics/shipment/payment/grievance
-are still explicitly out of scope — Module 5 only builds the quality data
-those modules will need (see "What's next" below), not the modules
-themselves.
+Logistics/shipment/payment/grievance are still explicitly out of scope.
 
 ```
 farmlink/
@@ -325,6 +344,149 @@ supplied grade always wins over a computed one.
   target that was matching itself — and are covered by the passing
   regression suite now, not just fixed.
 
+### Module 6 — Market Intelligence & Price Discovery (backend only)
+
+**Data model**: uses the existing `MarketPrice` table (populated by data
+ingestion) and adds `MarketIntelligenceRepository` for analytics queries.
+No new Prisma models — this module is read-only over the shared market
+data store.
+
+**Key concepts**:
+- **Price analytics**: average, min, max, volatility, and trend direction
+  (UP/DOWN/STABLE) for a crop in a given market/time range.
+- **Geographic market resolution**: district-level → state-level → national
+  fallback, with the geographic scope of the selected data always explicit
+  (never silently switching to a national average without the caller
+  knowing).
+- **Market data freshness**: every price data point is classified as
+  FRESH (≤24h) / RECENT (≤72h) / STALE (≤7d) / OUTDATED (>7d).
+  OUTDATED data is treated as insufficient for decision-making by
+  downstream modules (Module 8).
+- **Lot-scoped price benchmarks**: given a lot's crop and origin
+  (district/state), resolves the best available local market context.
+
+**API** (all under `/api/market-intelligence`):
+
+| Endpoint | Purpose |
+| --- | --- |
+| `GET /crops/:cropId/prices` | Price analytics for a crop (market, date range, trend) |
+| `GET /lots/:lotPublicId/market-context` | Lot-scoped market context (requires lot authorization) |
+
+**Security**: reuses `LotAuthorizationService` for lot-scoped endpoints and
+`FarmerProfileResolver` for caller identity. An unauthorized caller gets
+a 404 (obfuscated), never a 403 that confirms the lot exists.
+
+### Module 7 — Buyer Management & Matching (backend only)
+
+**Data model**: `BuyerProfile` (1:1 with `User`, holds buyer-specific
+preferences and verification status), `BuyerDemand` (a buyer's declared
+need: crop, quantity, quality requirements, price range, location
+preferences, with a full lifecycle state machine), and buyer↔lot
+matching/offer models. Demand quantity validation ensures
+`requiredQuantity` can never be updated below `committedQuantity` — the
+`REQUIRED_QUANTITY_BELOW_COMMITTED` domain error was added specifically
+for this.
+
+**Key concepts**:
+- **Demand lifecycle**: ACTIVE → PAUSED / FULFILLED / EXPIRED, with lazy
+  expiration (demands are marked expired on read if past their
+  `expiresAt`, not by a cron job).
+- **Deterministic matching**: buyer↔lot matching scores lots against a
+  demand based on quality grade, location proximity, and quantity fit.
+  No AI, no ML — the same inputs always produce the same ranking.
+- **Offer state machine**: PENDING → ACCEPTED / REJECTED / EXPIRED /
+  WITHDRAWN / COUNTERED, with atomic quantity reservation guards that
+  prevent double-booking and ensure `availableQuantityKg` never goes
+  negative.
+- **Concurrency safety**: quantity reservation uses conditional atomic
+  updates (only decrement if still enough available), so concurrent
+  offers against the same lot fail with a clear error rather than
+  silently over-committing.
+
+**API** (all under `/api`):
+
+| Endpoint | Purpose |
+| --- | --- |
+| `POST /buyer-profiles` | Create a buyer profile |
+| `GET/PATCH /buyer-profiles/me` | View/update the authenticated buyer's profile |
+| `POST /buyer-demands` | Create a demand |
+| `GET /buyer-demands` | List the authenticated buyer's demands |
+| `GET/PATCH /buyer-demands/:id` | View/update a single demand |
+| `POST /buyer-demands/:id/matches` | Find matching lots for a demand |
+| `POST /offers` | Create an offer against a lot |
+| `GET /offers` | List the authenticated user's offers |
+| `POST /offers/:id/{accept,reject,withdraw,counter}` | Offer state transitions |
+
+### Module 8 — Sell vs Store Decision Engine (backend only)
+
+**Data model**: `SellStoreDecision` — a single row per decision evaluation,
+with `status` (PENDING/COMPLETED/FAILED), `result` (SELL_NOW/STORE/
+INSUFFICIENT_DATA), `confidenceScore` (Decimal 5,4, validated 0–1),
+immutable `inputSnapshot` (Json — the exact market/quality/storage data
+used), and `decisionMetadata` (Json — engine version, sell/store scores,
+factors used, omitted factors, insufficiency reasons). The lot relation
+uses `onDelete: Restrict` so historical decisions are never silently
+deleted with lots.
+
+**Architecture** (five layers, each testable in isolation):
+
+1. **Part 1 — Foundation**: `SellStoreDecision` Prisma model,
+   `SellStoreDecisionRepository`, and `SellStoreInputSnapshot` types.
+2. **Part 2 — Input Resolution**: `DecisionInputResolverService` gathers
+   lot context, quality data (latest non-superseded assessment), and
+   market intelligence (reusing Module 6's analytics). Reports exactly
+   which inputs are available/missing and never fabricates data.
+3. **Part 3 — Decision Engine**: `DecisionEngineService` — a pure,
+   deterministic function `(ResolvedDecisionInput → DecisionEngineResult)`.
+   Four directional factors (MARKET_TREND, VOLATILITY, STORAGE_RISK,
+   QUALITY_CONSTRAINTS) contribute evidence toward SELL_NOW or STORE.
+   Market data freshness affects confidence (not direction). Storage
+   availability uses an explicit tri-state (AVAILABLE/UNAVAILABLE/UNKNOWN).
+   Centralized weights/thresholds in
+   `sell-store-decision-engine.config.ts`.
+4. **Part 4 — Orchestration**: `SellStoreOrchestrationService` coordinates
+   resolver → engine → repository with a strict PENDING → COMPLETED|FAILED
+   lifecycle. Persists immutable `inputSnapshot` + `decisionMetadata`
+   (engine version `v1`, all scores and factors) so historical decisions
+   remain reproducible without recomputation. `INSUFFICIENT_DATA` is a
+   valid completed outcome, not a failure.
+5. **Part 5 — API & Authorization**: Three authenticated endpoints
+   exposed via `createSellStoreRouter`, using the project's existing
+   `createAuthMiddleware`, `validateParams`, and `asyncHandler` patterns.
+
+**API** (all under `/api/sell-vs-store`):
+
+| Endpoint | Purpose |
+| --- | --- |
+| `POST /lots/:lotPublicId/analyze` | Generate a new deterministic decision |
+| `GET /lots/:lotPublicId/history` | List historical decisions for a lot (newest first) |
+| `GET /decisions/:publicId` | Retrieve a specific historical decision |
+
+**Key design rules**:
+- **Deterministic**: NO AI, NO LLM, NO forecasting models, NO fabricated
+  future prices. The same inputs always produce the same result.
+- **Immutable history**: retrieval endpoints return exactly what was
+  persisted — they never recompute scores, re-run the engine, or fetch
+  current market prices to replace old values.
+- **Authorization**: reuses `LotAuthorizationService.canViewLot()` —
+  FARMER can only access their own lots, FPO_ADMIN their FPO's lots,
+  ADMIN all lots. Unauthorized access returns 404 (obfuscated).
+- **Controllers are thin**: extract params, authorize, call orchestrator,
+  return DTO. Zero business logic in the API layer.
+- **`INSUFFICIENT_DATA` is HTTP 200**: it's a valid completed analysis
+  reflecting sparse data, not an operational failure.
+
+**Security**: the client cannot inject arbitrary prices, market values, or
+scoring weights — the server resolves all authoritative data internally
+from Modules 5 and 6.
+
+- 35 new Module 8 backend tests (15 engine unit + 5 orchestration unit +
+  15 integration): deterministic scoring across all factor combinations,
+  confidence gating, INSUFFICIENT_DATA handling, PENDING→FAILED exception
+  safety, full authorization flow (farmer/admin/unauthorized), parameter
+  validation, and verification that historical retrieval never triggers
+  recomputation.
+
 ## Verification status (read this before assuming something's broken)
 
 This was built in a network-sandboxed environment that could reach npm and
@@ -333,56 +495,31 @@ binaries couldn't be downloaded here — same situation Modules 1 & 2 were
 originally delivered under (see `backend/prisma/README-engines.md`):
 
 - Backend logic, RBAC, ownership, and the full Jest+Supertest suite
-  (213/213 passing, `isolatedModules: true` in ts-jest means this runs
+  (248+ passing, `isolatedModules: true` in ts-jest means this runs
   without full cross-file type-checking) were verified using in-memory fake
-  repositories instead of a live Prisma client for **all five** modules —
-  see `backend/tests/testUtils/`. Module 3's fakes
-  (`inMemoryFpoRepository.ts`, `inMemoryFpoAdminRepository.ts`,
-  `inMemoryFpoMembershipRepository.ts`, `inMemoryAggregationGroupRepository.ts`),
-  Module 4's (`inMemoryCropLotRepository.ts`), and Module 5's
-  (`inMemoryQualityRepository.ts`, which joins against
-  `inMemoryCropLotRepository.ts` the same way that one joins against
-  reference data) all follow the exact same pattern. Module 5's AI
-  provider is also swappable per-test (`buildTestApp({ qualityAiProvider })`)
-  so both a fake-succeeding and an always-failing provider could be
-  exercised without ever calling a real AI API.
-- `npx tsc --noEmit` cannot succeed in this sandbox for *any* module (the
-  same "no exported member" errors from `@prisma/client`'s placeholder
-  default client appear across every module, old and new alike, including
-  Module 5's) — this is the missing-generated-client limitation above, not
-  a code defect; `prisma/README-engines.md` documents the same finding
-  from Modules 1-4's original build. `npx eslint` passes clean on the
-  whole `src` tree.
-- `prisma/schema.prisma` was hand-verified against Prisma's documented
-  syntax rather than `prisma validate`, for the same reason. There is
-  still no `prisma/migrations/` folder checked in. `FpoMembership`'s
-  "one ACTIVE membership per farmer" rule is enforced server-side in
-  `membership.service.ts`; the ideal *additional* DB-level enforcement is a
-  partial unique index that Prisma's schema DSL can't express
-  declaratively — the exact SQL to hand-add is documented in a comment
-  above the `FpoMembership` model. Run `npx prisma generate && npx prisma
-  migrate dev --name module_5_quality_grading` once on a machine with
-  normal internet access and everything (including Modules 1-4's
-  original caveat) resolves together.
+  repositories instead of a live Prisma client for **all eight** modules —
+  see `backend/tests/testUtils/`. Module 8's tests mock the orchestration
+  dependencies (resolver, engine, repository) and auth middleware to test
+  the full API→authorization→orchestration→persistence flow in isolation.
+- `npx tsc --noEmit` passes clean on the current codebase (Module 8 was
+  developed with Prisma client generation available).
+- `prisma/schema.prisma` includes the `SellStoreDecision` model with
+  `decisionMetadata` (Json), `inputSnapshot` (Json), `confidenceScore`
+  (Decimal 5,4), and indexes on `lotId`+`status` and
+  `requestedByUserId`. Run `npx prisma generate && npx prisma migrate dev`
+  once on a machine with normal internet access.
 
 ## Design notes worth knowing before you extend this
 
-- **`app.ts` is still fully dependency-injected**, now with seven more
-  Module 3/4/5 repositories (`fpoRepository`, `fpoAdminRepository`,
-  `fpoMembershipRepository`, `aggregationGroupRepository`,
-  `cropLotRepository`, `qualityRepository`, `qualityStandardRepository`)
-  alongside Module 2's four and Module 1's `authRepository`/
-  `auditService`. `server.ts` is still the only file that constructs real
-  Prisma-backed repositories; `tests/testUtils/buildTestApp.ts` constructs
-  the in-memory fakes instead. Module 5 adds one more, non-repository
-  dependency to this pattern: `AppDependencies.qualityAiProvider` is
-  *optional*, defaulting to `UnavailableQualityAIProvider` when unset (as
-  it always is in `server.ts`) — tests are the only caller that ever
-  supplies a different one.
-- **Every Module 3/4/5 URL segment (`:fpoId`, `:membershipId`,
-  `:aggregationId`, a lot's `:id`, an assessment's `:publicId`) is a
-  `publicId`, never the internal database id** — same
-  externally-facing-identifier convention as `User.publicId`.
+- **`app.ts` is still fully dependency-injected**, now with Module 6/7/8
+  repositories and services alongside Modules 1-5's. Module 8 adds
+  `SellStoreDecisionRepository`, `DecisionInputResolverService`,
+  `DecisionEngineService`, and `SellStoreOrchestrationService`, all
+  wired in `app.ts` and mounted at `/api/sell-vs-store`.
+- **Every Module 3/4/5/6/7/8 URL segment (`:fpoId`, `:membershipId`,
+  `:aggregationId`, a lot's `:id`, an assessment's `:publicId`, a
+  decision's `:publicId`) is a `publicId`, never the internal database
+  id** — same externally-facing-identifier convention as `User.publicId`.
 - **Two intentionally separate "is this farmer in this FPO" signals.**
   Module 2's `FarmerProfile.fpoMembershipStatus`/`fpoId` (self-declared,
   no approval) is left completely untouched; `FpoMembership` (this module)
@@ -416,17 +553,20 @@ originally delivered under (see `backend/prisma/README-engines.md`):
   `Decimal`, matching `CropLot`'s quantity fields** — the same
   DB-precision reasoning applies to anything a future module (Buyer
   Matching, pricing) might do arithmetic against.
+- **Module 8's `inputSnapshot` and `decisionMetadata` are `Json?`, not
+  structured Prisma relations** — deliberately, because decision snapshots
+  must remain historically reproducible even when the schema of market
+  prices, quality metrics, or storage infrastructure evolves. The service
+  layer treats completed snapshots as immutable.
 
-## What's next (Module 6+, not in this repo)
+## What's next (Module 9+, not yet implemented)
 
-Market Intelligence, Price Forecasting, Sell vs. Store, Warehouse, Buyer
-Management/Matching (consumes `AVAILABLE` lots plus
-`FpoAggregationService.getFpoCropAvailability` plus verified
-`QualityAssessment` grades), Offers/RFQ, and Logistics/Shipment/Payment/
-Grievance. All of them are expected to read Module 3/4/5's data through
-the services in `backend/src/modules/fpo`, `backend/src/modules/lots`, and
-`backend/src/modules/quality` rather than duplicating FPO/membership/
-aggregation/lot/quality state of their own. Module 21 (Disputes, per the
-Module 5 build spec) is the reason `QualityAssessment`/`QualityImage`/
-`QualityAIAnalysis` rows are never deleted or overwritten once created.
+Warehouse discovery/booking, logistics/shipment tracking, payment
+integration, and grievance/dispute resolution. All of them are expected
+to read Modules 3-8's data through the established service layer rather
+than duplicating state. Module 8's decision engine is designed to be
+extended with new factors (e.g. warehouse proximity, logistics cost) by
+adding new `DecisionFactor` entries and corresponding scoring logic in
+`sell-store-decision-engine.service.ts` without changing the orchestration
+or API layers.
 

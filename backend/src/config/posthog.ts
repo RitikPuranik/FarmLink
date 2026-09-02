@@ -61,6 +61,11 @@ const ALLOWED_EVENTS = new Set([
   "trade_offer_countered",
   "trade_offer_accepted",
   "trade_offer_rejected",
+  // Module 8 — Sell vs Store Decision Engine
+  "decision_engine_started",
+  "decision_engine_completed",
+  "historical_decision_viewed",
+  "lot_history_viewed",
 ]);
 
 // Defense in depth: even if a caller accidentally passes a sensitive key in
