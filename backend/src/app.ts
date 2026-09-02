@@ -43,6 +43,11 @@ import { createGovernmentFpoRouter } from "./modules/fpo/government.routes";
 import { CropLotRepository } from "./modules/lots/lots.repository";
 import { LotStatusService } from "./modules/lots/lot-status.service";
 import { LotAuthorizationService } from "./modules/lots/lot.authorization";
+import { SellStoreDecisionRepository } from "./modules/sell-vs-store/sell-vs-store.repository";
+import { DecisionInputResolverService } from "./modules/sell-vs-store/sell-store-input-resolver.service";
+import { DecisionEngineService } from "./modules/sell-vs-store/sell-store-decision-engine.service";
+import { SellStoreOrchestrationService } from "./modules/sell-vs-store/sell-store-orchestration.service";
+import { createSellStoreRouter } from "./modules/sell-vs-store/sell-vs-store.routes";
 import { LotsService } from "./modules/lots/lots.service";
 import { createFarmerLotsSummaryRouter, createFpoLotsRouter, createLotsRouter } from "./modules/lots/lots.routes";
 import { QualityRepository, QualityStandardRepository } from "./modules/quality/quality.repository";
@@ -281,6 +286,33 @@ export function createApp(deps: AppDependencies): Express {
     createMarketIntelligenceRouter(marketIntelligenceService, deps.authRepository, deps.auditService),
   );
   app.use("/api", createBuyerMatchingRouter(buyerMatchingService, deps.authRepository, deps.auditService));
+
+  // Module 8 — Sell vs Store Decision Engine
+  const sellStoreDecisionRepository = new SellStoreDecisionRepository(deps.prisma);
+  const decisionInputResolverService = new DecisionInputResolverService(
+    deps.cropLotRepository,
+    deps.qualityRepository,
+    new MarketIntelligenceRepository(deps.prisma) // Reusing existing repository pattern
+  );
+  const decisionEngineService = new DecisionEngineService();
+  const sellStoreOrchestrationService = new SellStoreOrchestrationService(
+    deps.cropLotRepository,
+    sellStoreDecisionRepository,
+    decisionInputResolverService,
+    decisionEngineService
+  );
+
+  app.use(
+    "/api/sell-vs-store",
+    createSellStoreRouter(
+      sellStoreOrchestrationService,
+      deps.cropLotRepository,
+      lotAuthorization,
+      farmerProfileResolver,
+      deps.authRepository,
+      deps.auditService
+    )
+  );
 
   app.use(notFoundHandler);
   app.use(errorHandler);

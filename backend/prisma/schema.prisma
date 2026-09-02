@@ -214,8 +214,8 @@ model User {
   publicId String @unique @default(uuid())
 
   fullName     String
-  mobile       String  @unique
-  email        String? @unique
+  mobile       String        @unique
+  email        String?       @unique
   buyerProfile BuyerProfile?
   passwordHash String
 
@@ -253,6 +253,9 @@ model User {
   // display ("changed by Ramesh Patil"); never required, never a second
   // source of truth for identity.
   lotStatusChanges LotStatusHistory[]
+
+  // Module 8
+  sellStoreDecisions SellStoreDecision[]
 
   @@index([mobile])
   @@index([email])
@@ -323,7 +326,7 @@ model OtpChallenge {
 }
 
 model AuditLog {
-  id          String @id @default(uuid())
+  id          String  @id @default(uuid())
   actorUserId String?
 
   action     String
@@ -519,10 +522,12 @@ model Crop {
   // Module 5 — per-crop grading rules (build spec section 14/48).
   qualityStandards QualityStandard[]
 
-  // Module 6 — canonical crop reference reused by imported market data.
-  mandiPrices MandiPrice[]
+  mandiPrices   MandiPrice[]
   marketAliases CropAlias[]
-  buyerDemands BuyerDemand[]
+  buyerDemands  BuyerDemand[]
+
+  // Module 8
+  sellStoreDecisions SellStoreDecision[]
 
   @@map("crops")
 }
@@ -561,9 +566,9 @@ model FarmerProfile {
   fpoMembershipStatus FpoMembershipStatus?
   fpoId               String?
 
-  liquidityPreference      LiquidityPreference?
-  willingToStore           Boolean?
-  communicationPreference  CommunicationPreference @default(IN_APP)
+  liquidityPreference     LiquidityPreference?
+  willingToStore          Boolean?
+  communicationPreference CommunicationPreference @default(IN_APP)
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -686,8 +691,8 @@ model FarmerCrop {
 // admin operation must find an ACTIVE row here for (userId, fpoId) first.
 // See modules/fpo/fpo.authorization.ts.
 model FpoAdmin {
-  id    String @id @default(uuid())
-  fpoId String
+  id     String @id @default(uuid())
+  fpoId  String
   userId String
 
   role   FpoAdminRole
@@ -877,9 +882,11 @@ model CropLot {
   // Module 5 — every quality assessment ever created for this lot,
   // oldest first by createdAt; never deleted when superseded (build spec
   // section 31/32/70: historical assessments must survive for future
-  // dispute-resolution modules).
   qualityAssessments QualityAssessment[]
-  tradeOffers TradeOffer[]
+  tradeOffers        TradeOffer[]
+
+  // Module 8
+  sellStoreDecisions SellStoreDecision[]
 
   @@index([farmerId, status])
   @@index([fpoId, status])
@@ -909,8 +916,8 @@ model LotStatusHistory {
 
   createdAt DateTime @default(now())
 
-  lot         CropLot @relation(fields: [lotId], references: [id], onDelete: Cascade)
-  changedByUser User? @relation(fields: [changedBy], references: [id], onDelete: SetNull)
+  lot           CropLot @relation(fields: [lotId], references: [id], onDelete: Cascade)
+  changedByUser User?   @relation(fields: [changedBy], references: [id], onDelete: SetNull)
 
   @@index([lotId])
   @@index([createdAt])
@@ -1005,6 +1012,7 @@ enum QualityAIAnalysisStatus {
   COMPLETED
   FAILED
 }
+
 //
 // The record of one assessment event (build spec section 7). A lot can
 // have many of these over time — see the model-level comment above this
@@ -1023,13 +1031,13 @@ model QualityAssessment {
   // CropLot.lotNumber (see lots/lot-number.ts) — see quality/assessment-number.ts.
   assessmentNumber String @unique
 
-  source           QualityAssessmentSource
-  status           QualityAssessmentStatus  @default(DRAFT)
+  source             QualityAssessmentSource
+  status             QualityAssessmentStatus   @default(DRAFT)
   verificationStatus QualityVerificationStatus @default(SELF_REPORTED)
 
   overallGrade    QualityGrade?
-  qualityScore    Decimal? @db.Decimal(5, 2)
-  confidenceScore Decimal? @db.Decimal(4, 3)
+  qualityScore    Decimal?      @db.Decimal(5, 2)
+  confidenceScore Decimal?      @db.Decimal(4, 3)
 
   // Who submitted (for MANUAL/HYBRID) or most recently verified this
   // assessment — informational/audit-trail only, deliberately a plain
@@ -1052,7 +1060,7 @@ model QualityAssessment {
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
-  lot        CropLot            @relation(fields: [lotId], references: [id], onDelete: Restrict)
+  lot        CropLot             @relation(fields: [lotId], references: [id], onDelete: Restrict)
   metrics    QualityMetric[]
   images     QualityImage[]
   defects    QualityDefect[]
@@ -1065,6 +1073,7 @@ model QualityAssessment {
   @@index([overallGrade])
   @@map("quality_assessments")
 }
+
 //
 // Flexible per-crop metrics (build spec section 11-13) — never columns
 // like `moisture`/`damage`/`color` directly on QualityAssessment, so a new
@@ -1093,6 +1102,7 @@ model QualityMetric {
   @@index([metricCode])
   @@map("quality_metrics")
 }
+
 //
 // Image metadata only (build spec section 15: "Do not store binary image
 // data in PostgreSQL"). `storageProvider`/`externalId` are deliberately
@@ -1113,7 +1123,7 @@ model QualityImage {
   // analysis-result caching — not used for any dedup logic yet.
   checksum        String?
 
-  imageType      QualityImageType @default(OTHER)
+  imageType        QualityImageType @default(OTHER)
   uploadedByUserId String?
 
   uploadedAt DateTime @default(now())
@@ -1123,6 +1133,7 @@ model QualityImage {
   @@index([assessmentId])
   @@map("quality_images")
 }
+
 //
 // Build spec section 44-45: defects are their own flexible rows for the
 // same reason metrics are — never crop-specific columns.
@@ -1146,6 +1157,7 @@ model QualityDefect {
   @@index([assessmentId])
   @@map("quality_defects")
 }
+
 //
 // One row per AI analysis *attempt* (build spec section 38-39/42-43) —
 // including retries — rather than a single mutable "the AI result" field,
@@ -1183,6 +1195,7 @@ model QualityAIAnalysis {
   @@index([status])
   @@map("quality_ai_analyses")
 }
+
 //
 // Build spec section 14/48: a clean, additive per-crop grading foundation
 // — deliberately NOT a full rules engine (boolean expressions, AND/OR
@@ -1231,17 +1244,17 @@ enum MarketImportStatus {
 
 // A source market. Location is deliberately optional: it is never guessed.
 model Mandi {
-  id String @id @default(uuid())
+  id       String @id @default(uuid())
   publicId String @unique @default(uuid())
 
-  source       String
+  source         String
   sourceMarketId String?
-  name         String
+  name           String
   normalizedName String
-  state        String
-  district     String
-  latitude     Float?
-  longitude    Float?
+  state          String
+  district       String
+  latitude       Float?
+  longitude      Float?
   sourceMetadata Json?
 
   createdAt DateTime @default(now())
@@ -1258,24 +1271,24 @@ model Mandi {
 
 // Canonical, date-wise historical price data. Monetary values are INR/QTL.
 model MandiPrice {
-  id String @id @default(uuid())
-  cropId String
-  mandiId String
-  source String
+  id             String   @id @default(uuid())
+  cropId         String
+  mandiId        String
+  source         String
   sourceRecordId String?
-  observedDate DateTime @db.Date
+  observedDate   DateTime @db.Date
 
-  minPrice Decimal @db.Decimal(14, 2)
-  maxPrice Decimal @db.Decimal(14, 2)
-  modalPrice Decimal @db.Decimal(14, 2)
-  arrivalQuantity Decimal? @db.Decimal(14, 2)
-  arrivalUnit QuantityUnit?
-  sourceMetadata Json?
-  retrievedAt DateTime @default(now())
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
+  minPrice        Decimal       @db.Decimal(14, 2)
+  maxPrice        Decimal       @db.Decimal(14, 2)
+  modalPrice      Decimal       @db.Decimal(14, 2)
+  arrivalQuantity Decimal?      @db.Decimal(14, 2)
+  arrivalUnit     QuantityUnit?
+  sourceMetadata  Json?
+  retrievedAt     DateTime      @default(now())
+  createdAt       DateTime      @default(now())
+  updatedAt       DateTime      @updatedAt
 
-  crop Crop @relation(fields: [cropId], references: [id], onDelete: Restrict)
+  crop  Crop  @relation(fields: [cropId], references: [id], onDelete: Restrict)
   mandi Mandi @relation(fields: [mandiId], references: [id], onDelete: Restrict)
 
   @@unique([cropId, mandiId, observedDate, source])
@@ -1288,12 +1301,12 @@ model MandiPrice {
 
 // Explicit aliases prevent an importer from inventing a Crop record.
 model CropAlias {
-  id String @id @default(uuid())
-  cropId String
-  source String
-  alias String
+  id              String   @id @default(uuid())
+  cropId          String
+  source          String
+  alias           String
   normalizedAlias String
-  createdAt DateTime @default(now())
+  createdAt       DateTime @default(now())
 
   crop Crop @relation(fields: [cropId], references: [id], onDelete: Cascade)
 
@@ -1304,22 +1317,22 @@ model CropAlias {
 
 // Durable, non-sensitive operational record for import and sync attempts.
 model MarketDataImportRun {
-  id String @id @default(uuid())
-  source String
-  operation MarketImportOperation
-  status MarketImportStatus @default(RUNNING)
-  recordsRead Int @default(0)
-  recordsImported Int @default(0)
-  recordsUpdated Int @default(0)
-  recordsSkipped Int @default(0)
-  recordsRejected Int @default(0)
-  validationFailures Int @default(0)
-  partialFailures Int @default(0)
-  diagnostics Json?
-  metadata Json?
-  startedAt DateTime @default(now())
-  completedAt DateTime?
-  createdAt DateTime @default(now())
+  id                 String                @id @default(uuid())
+  source             String
+  operation          MarketImportOperation
+  status             MarketImportStatus    @default(RUNNING)
+  recordsRead        Int                   @default(0)
+  recordsImported    Int                   @default(0)
+  recordsUpdated     Int                   @default(0)
+  recordsSkipped     Int                   @default(0)
+  recordsRejected    Int                   @default(0)
+  validationFailures Int                   @default(0)
+  partialFailures    Int                   @default(0)
+  diagnostics        Json?
+  metadata           Json?
+  startedAt          DateTime              @default(now())
+  completedAt        DateTime?
+  createdAt          DateTime              @default(now())
 
   @@index([source, operation, startedAt])
   @@map("market_data_import_runs")
@@ -1327,13 +1340,13 @@ model MarketDataImportRun {
 
 // Progress is advanced only after a page/range was persisted successfully.
 model MarketDataSyncCheckpoint {
-  id String @id @default(uuid())
-  source String @unique
+  id                         String    @id @default(uuid())
+  source                     String    @unique
   lastSuccessfulObservedDate DateTime? @db.Date
-  cursor String?
-  metadata Json?
-  lastSuccessfulSyncAt DateTime?
-  updatedAt DateTime @updatedAt
+  cursor                     String?
+  metadata                   Json?
+  lastSuccessfulSyncAt       DateTime?
+  updatedAt                  DateTime  @updatedAt
 
   @@map("market_data_sync_checkpoints")
 }
@@ -1377,62 +1390,64 @@ enum TradeOfferStatus {
 }
 
 model BuyerProfile {
-  id String @id @default(uuid())
-  publicId String @unique @default(uuid())
-  userId String @unique
-  organizationName String
-  businessType BuyerBusinessType
-  description String?
-  contactPerson String
-  phone String
-  email String?
-  address String?
-  state String
-  district String
-  latitude Float?
-  longitude Float?
-  website String?
+  id                 String                  @id @default(uuid())
+  publicId           String                  @unique @default(uuid())
+  userId             String                  @unique
+  organizationName   String
+  businessType       BuyerBusinessType
+  description        String?
+  contactPerson      String
+  phone              String
+  email              String?
+  address            String?
+  state              String
+  district           String
+  latitude           Float?
+  longitude          Float?
+  website            String?
   verificationStatus BuyerVerificationStatus @default(PENDING)
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
-  user User @relation(fields:[userId], references:[id], onDelete: Cascade)
-  demands BuyerDemand[]
-  buyerOffers TradeOffer[] @relation("OfferBuyer")
+  createdAt          DateTime                @default(now())
+  updatedAt          DateTime                @updatedAt
+  user               User                    @relation(fields: [userId], references: [id], onDelete: Cascade)
+  demands            BuyerDemand[]
+  buyerOffers        TradeOffer[]            @relation("OfferBuyer")
+
   @@index([verificationStatus])
   @@index([state, district])
   @@map("buyer_profiles")
 }
 
 model BuyerDemand {
-  id String @id @default(uuid())
-  publicId String @unique @default(uuid())
-  buyerId String
-  cropId String
-  title String
-  description String?
-  requiredQuantity Decimal @db.Decimal(14,2)
-  minimumQuantity Decimal? @db.Decimal(14,2)
-  quantityUnit QuantityUnit
-  targetPrice Decimal? @db.Decimal(14,2)
-  minimumPrice Decimal? @db.Decimal(14,2)
-  maximumPrice Decimal? @db.Decimal(14,2)
+  id                  String            @id @default(uuid())
+  publicId            String            @unique @default(uuid())
+  buyerId             String
+  cropId              String
+  title               String
+  description         String?
+  requiredQuantity    Decimal           @db.Decimal(14, 2)
+  minimumQuantity     Decimal?          @db.Decimal(14, 2)
+  quantityUnit        QuantityUnit
+  targetPrice         Decimal?          @db.Decimal(14, 2)
+  minimumPrice        Decimal?          @db.Decimal(14, 2)
+  maximumPrice        Decimal?          @db.Decimal(14, 2)
   qualityRequirements Json?
-  grade QualityGrade?
-  state String
-  district String
-  latitude Float?
-  longitude Float?
-  deliveryLocation String?
-  deliveryStartDate DateTime?
-  deliveryEndDate DateTime?
-  status BuyerDemandStatus @default(DRAFT)
-  committedQuantity Decimal @default(0) @db.Decimal(14,2)
-  expiresAt DateTime?
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
-  buyer BuyerProfile @relation(fields:[buyerId], references:[id], onDelete: Restrict)
-  crop Crop @relation(fields:[cropId], references:[id], onDelete: Restrict)
-  offers TradeOffer[]
+  grade               QualityGrade?
+  state               String
+  district            String
+  latitude            Float?
+  longitude           Float?
+  deliveryLocation    String?
+  deliveryStartDate   DateTime?
+  deliveryEndDate     DateTime?
+  status              BuyerDemandStatus @default(DRAFT)
+  committedQuantity   Decimal           @default(0) @db.Decimal(14, 2)
+  expiresAt           DateTime?
+  createdAt           DateTime          @default(now())
+  updatedAt           DateTime          @updatedAt
+  buyer               BuyerProfile      @relation(fields: [buyerId], references: [id], onDelete: Restrict)
+  crop                Crop              @relation(fields: [cropId], references: [id], onDelete: Restrict)
+  offers              TradeOffer[]
+
   @@index([buyerId, status])
   @@index([cropId, status])
   @@index([status, expiresAt])
@@ -1440,28 +1455,29 @@ model BuyerDemand {
 }
 
 model TradeOffer {
-  id String @id @default(uuid())
-  publicId String @unique @default(uuid())
-  lotId String
+  id            String               @id @default(uuid())
+  publicId      String               @unique @default(uuid())
+  lotId         String
   buyerDemandId String?
-  buyerId String
-  sellerId String
-  initiatorId String
-  quantity Decimal @db.Decimal(14,2)
-  quantityUnit QuantityUnit
-  offeredPrice Decimal @db.Decimal(14,2)
-  priceUnit String @default("INR_PER_QUINTAL")
-  totalValue Decimal @db.Decimal(16,2)
+  buyerId       String
+  sellerId      String
+  initiatorId   String
+  quantity      Decimal              @db.Decimal(14, 2)
+  quantityUnit  QuantityUnit
+  offeredPrice  Decimal              @db.Decimal(14, 2)
+  priceUnit     String               @default("INR_PER_QUINTAL")
+  totalValue    Decimal              @db.Decimal(16, 2)
   deliveryTerms String?
-  message String?
-  status TradeOfferStatus @default(DRAFT)
-  expiresAt DateTime?
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
-  lot CropLot @relation(fields:[lotId], references:[id], onDelete: Restrict)
-  demand BuyerDemand? @relation(fields:[buyerDemandId], references:[id], onDelete: SetNull)
-  buyer BuyerProfile @relation("OfferBuyer", fields:[buyerId], references:[id], onDelete: Restrict)
-  revisions TradeOfferRevision[]
+  message       String?
+  status        TradeOfferStatus     @default(DRAFT)
+  expiresAt     DateTime?
+  createdAt     DateTime             @default(now())
+  updatedAt     DateTime             @updatedAt
+  lot           CropLot              @relation(fields: [lotId], references: [id], onDelete: Restrict)
+  demand        BuyerDemand?         @relation(fields: [buyerDemandId], references: [id], onDelete: SetNull)
+  buyer         BuyerProfile         @relation("OfferBuyer", fields: [buyerId], references: [id], onDelete: Restrict)
+  revisions     TradeOfferRevision[]
+
   @@index([lotId, status])
   @@index([buyerId, status])
   @@index([buyerDemandId, status])
@@ -1469,18 +1485,70 @@ model TradeOffer {
 }
 
 model TradeOfferRevision {
-  id String @id @default(uuid())
-  offerId String
+  id             String     @id @default(uuid())
+  offerId        String
   revisionNumber Int
-  initiatedBy String
-  quantity Decimal @db.Decimal(14,2)
-  offeredPrice Decimal @db.Decimal(14,2)
-  priceUnit String @default("INR_PER_QUINTAL")
-  deliveryTerms String?
-  message String?
-  createdAt DateTime @default(now())
-  offer TradeOffer @relation(fields:[offerId], references:[id], onDelete: Cascade)
+  initiatedBy    String
+  quantity       Decimal    @db.Decimal(14, 2)
+  offeredPrice   Decimal    @db.Decimal(14, 2)
+  priceUnit      String     @default("INR_PER_QUINTAL")
+  deliveryTerms  String?
+  message        String?
+  createdAt      DateTime   @default(now())
+  offer          TradeOffer @relation(fields: [offerId], references: [id], onDelete: Cascade)
+
   @@unique([offerId, revisionNumber])
   @@index([offerId, createdAt])
   @@map("trade_offer_revisions")
+}
+
+// ---------------------------------------------------------------------------
+// Module 8 — Sell vs Store Decision Engine
+// ---------------------------------------------------------------------------
+
+enum SellStoreDecisionStatus {
+  PENDING
+  COMPLETED
+  FAILED
+}
+
+enum SellStoreDecisionResult {
+  SELL_NOW
+  STORE
+  INSUFFICIENT_DATA
+}
+
+model SellStoreDecision {
+  id       String @id @default(uuid())
+  publicId String @unique @default(uuid())
+
+  lotId  String
+  cropId String
+
+  requestedByUserId String?
+
+  status SellStoreDecisionStatus  @default(PENDING)
+  result SellStoreDecisionResult?
+
+  confidenceScore Decimal? @db.Decimal(5, 4)
+
+  // Immutable snapshot of inputs used during the decision (Market, Lot, Storage context).
+  inputSnapshot Json?
+
+  // Metadata explaining the decision (engine version, scores, factors used, reasons).
+  decisionMetadata Json?
+
+  marketDataTimestamp  DateTime?
+  storageDataTimestamp DateTime?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  lot             CropLot @relation(fields: [lotId], references: [id], onDelete: Restrict)
+  crop            Crop    @relation(fields: [cropId], references: [id], onDelete: Restrict)
+  requestedByUser User?   @relation(fields: [requestedByUserId], references: [id], onDelete: SetNull)
+
+  @@index([lotId, status])
+  @@index([requestedByUserId])
+  @@map("sell_store_decisions")
 }
