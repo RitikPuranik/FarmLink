@@ -1,13 +1,23 @@
 import { Router } from "express";
+import { z } from "zod";
 import { AuthRepository } from "../auth/auth.repository";
 import { AuditService } from "../audit/audit.service";
 import { createAuthMiddleware } from "../auth/auth.middleware";
 import { asyncHandler } from "../../common/asyncHandler";
+import { validateParams } from "../../middleware/validateParams";
 import { SellStoreController } from "./sell-vs-store.controller";
 import { SellStoreOrchestrationService } from "./sell-store-orchestration.service";
 import { CropLotRepository } from "../lots/lots.repository";
 import { LotAuthorizationService } from "../lots/lot.authorization";
 import { FarmerProfileResolver } from "../farmers/farmer-profile.resolver";
+
+const lotPublicIdParamSchema = z.object({
+  lotPublicId: z.string().uuid("Invalid lot public ID."),
+});
+
+const decisionPublicIdParamSchema = z.object({
+  publicId: z.string().uuid("Invalid decision public ID."),
+});
 
 /**
  * Registers routes for Sell vs Store decision API.
@@ -45,16 +55,17 @@ export function createSellStoreRouter(
    *     responses:
    *       200:
    *         description: Decision generated successfully.
+   *       400:
+   *         description: Invalid lotPublicId format.
    *       401:
    *         description: Unauthorized.
-   *       403:
-   *         description: Forbidden (no access to lot).
    *       404:
-   *         description: Lot not found.
+   *         description: Lot not found or access denied.
    */
   router.post(
     "/lots/:lotPublicId/analyze",
     authMw,
+    validateParams(lotPublicIdParamSchema),
     asyncHandler(controller.generateDecision)
   );
 
@@ -75,16 +86,17 @@ export function createSellStoreRouter(
    *     responses:
    *       200:
    *         description: List of historical decisions.
+   *       400:
+   *         description: Invalid lotPublicId format.
    *       401:
    *         description: Unauthorized.
-   *       403:
-   *         description: Forbidden.
    *       404:
-   *         description: Lot not found.
+   *         description: Lot not found or access denied.
    */
   router.get(
     "/lots/:lotPublicId/history",
     authMw,
+    validateParams(lotPublicIdParamSchema),
     asyncHandler(controller.getDecisionHistory)
   );
 
@@ -105,16 +117,17 @@ export function createSellStoreRouter(
    *     responses:
    *       200:
    *         description: Historical decision retrieved successfully.
+   *       400:
+   *         description: Invalid publicId format.
    *       401:
    *         description: Unauthorized.
-   *       403:
-   *         description: Forbidden.
    *       404:
    *         description: Decision or lot not found.
    */
   router.get(
     "/decisions/:publicId",
     authMw,
+    validateParams(decisionPublicIdParamSchema),
     asyncHandler(controller.getHistoricalDecision)
   );
 

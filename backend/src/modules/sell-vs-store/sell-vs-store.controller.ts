@@ -1,27 +1,15 @@
 import { Request, Response } from "express";
-import { z } from "zod";
-import { AuthorizationError, NotFoundError } from "../../common/errors";
+import { NotFoundError } from "../../common/errors";
 import { AuthenticatedUserContext } from "../auth/auth.types";
 import { FarmerProfileResolver } from "../farmers/farmer-profile.resolver";
 import { CropLotRepository } from "../lots/lots.repository";
 import { LotAuthorizationService } from "../lots/lot.authorization";
 import { SellStoreOrchestrationService } from "./sell-store-orchestration.service";
 
-const analyzeSchema = z.object({
-  lotPublicId: z.string().uuid("Invalid lot public ID"),
-});
-
-const historySchema = z.object({
-  lotPublicId: z.string().uuid("Invalid lot public ID"),
-});
-
-const getDecisionSchema = z.object({
-  publicId: z.string().uuid("Invalid decision public ID"),
-});
-
 /**
  * Controller for Sell vs Store API endpoints.
- * Handles validation and authorization, but delegates all logic to the orchestration service.
+ * Handles authorization only — delegates all logic to the orchestration service.
+ * Validation is handled upstream by validateParams middleware (project convention).
  */
 export class SellStoreController {
   constructor(
@@ -33,6 +21,7 @@ export class SellStoreController {
 
   /**
    * Orchestrates authorization: resolves farmer, checks lot access.
+   * Returns 404 (obfuscated) for unauthorized access to hide lot existence.
    */
   private async ensureAuthorizedForLot(user: AuthenticatedUserContext, lotPublicId: string) {
     const lot = await this.lots.findByPublicId(lotPublicId);
@@ -52,7 +41,7 @@ export class SellStoreController {
 
   generateDecision = async (req: Request, res: Response) => {
     const user = req.user as AuthenticatedUserContext;
-    const { lotPublicId } = analyzeSchema.parse(req.params);
+    const { lotPublicId } = req.params;
 
     await this.ensureAuthorizedForLot(user, lotPublicId);
 
@@ -62,7 +51,7 @@ export class SellStoreController {
 
   getDecisionHistory = async (req: Request, res: Response) => {
     const user = req.user as AuthenticatedUserContext;
-    const { lotPublicId } = historySchema.parse(req.params);
+    const { lotPublicId } = req.params;
 
     await this.ensureAuthorizedForLot(user, lotPublicId);
 
@@ -72,7 +61,7 @@ export class SellStoreController {
 
   getHistoricalDecision = async (req: Request, res: Response) => {
     const user = req.user as AuthenticatedUserContext;
-    const { publicId } = getDecisionSchema.parse(req.params);
+    const { publicId } = req.params;
 
     // 1. Fetch decision first
     const decision = await this.orchestrator.getDecisionByPublicId(publicId);

@@ -1,4 +1,4 @@
-import { PrismaClient, Prisma, SellStoreDecision } from "@prisma/client";
+import { PrismaClient, Prisma, SellStoreDecision, SellStoreDecisionResult } from "@prisma/client";
 import { SellStoreInputSnapshot } from "./sell-vs-store.types";
 
 export class SellStoreDecisionRepository {
@@ -46,7 +46,7 @@ export class SellStoreDecisionRepository {
 
   async completeDecision(
     id: string,
-    result: Prisma.SellStoreDecisionResult,
+    result: SellStoreDecisionResult,
     confidenceScore: number,
     inputSnapshot: Prisma.InputJsonValue,
     decisionMetadata: Prisma.InputJsonValue,
