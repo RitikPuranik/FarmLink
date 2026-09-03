@@ -190,4 +190,199 @@ describe("SellStoreOrchestrationService", () => {
     decisionRepositoryMock.findByPublicId.mockResolvedValue(null);
     await expect(orchestrationService.getDecisionByPublicId("nope")).rejects.toThrow(NotFoundError);
   });
+
+  it("6. generateDecision throws NotFound for a missing lot without touching the resolver/engine/repository", async () => {
+    lotsRepositoryMock.findByPublicId.mockResolvedValue(null);
+
+    await expect(orchestrationService.generateDecision("no-such-lot", "user-1")).rejects.toThrow(NotFoundError);
+
+    expect(resolverServiceMock.resolveDecisionInputs).not.toHaveBeenCalled();
+    expect(decisionRepositoryMock.createDecision).not.toHaveBeenCalled();
+    expect(engineServiceMock.evaluate).not.toHaveBeenCalled();
+  });
+
+  it("7. getDecisionsForLot throws NotFound for a missing lot without querying decisions", async () => {
+    lotsRepositoryMock.findByPublicId.mockResolvedValue(null);
+
+    await expect(orchestrationService.getDecisionsForLot("no-such-lot")).rejects.toThrow(NotFoundError);
+
+    expect(decisionRepositoryMock.listByLotId).not.toHaveBeenCalled();
+  });
+
+  it("8. getDecisionsForLot returns mapped historical decisions without recomputation (no engine/resolver/AI calls)", async () => {
+    lotsRepositoryMock.findByPublicId.mockResolvedValue(lotFixture);
+    decisionRepositoryMock.listByLotId.mockResolvedValue([
+      {
+        id: "dec-a",
+        publicId: "pub-dec-a",
+        status: "COMPLETED",
+        result: "SELL_NOW",
+        confidenceScore: new Prisma.Decimal(0.7),
+        inputSnapshot: mockSnapshot,
+        decisionMetadata: { engineVersion: "v1" },
+      },
+      {
+        id: "dec-b",
+        publicId: "pub-dec-b",
+        status: "COMPLETED",
+        result: "STORE",
+        confidenceScore: new Prisma.Decimal(0.6),
+        inputSnapshot: mockSnapshot,
+        decisionMetadata: { engineVersion: "v1" },
+      },
+    ]);
+
+    const result = await orchestrationService.getDecisionsForLot("public-lot-1");
+
+    expect(decisionRepositoryMock.listByLotId).toHaveBeenCalledWith("lot-1");
+    expect(result).toHaveLength(2);
+    expect(result[0].publicId).toBe("pub-dec-a");
+    expect(result[1].publicId).toBe("pub-dec-b");
+    // Historical reads never recompute or contact the AI provider.
+    expect(resolverServiceMock.resolveDecisionInputs).not.toHaveBeenCalled();
+    expect(engineServiceMock.evaluate).not.toHaveBeenCalled();
+    expect(decisionRepositoryMock.createDecision).not.toHaveBeenCalled();
+    // Historical decisions never carry a persisted AI advisory.
+    expect(result[0].aiAdvisory).toBeNull();
+    expect(result[1].aiAdvisory).toBeNull();
+  });
+
+  it("9. Repeated sequential generateDecision calls for the same lot behave independently", async () => {
+    lotsRepositoryMock.findByPublicId.mockResolvedValue(lotFixture);
+    resolverServiceMock.resolveDecisionInputs.mockResolvedValue(resolvedInputFixture);
+
+    const engineResult: DecisionEngineResult = {
+      result: "SELL_NOW",
+      sellScore: 80,
+      storeScore: 20,
+      confidence: 0.9,
+      factorsUsed: ["MARKET_TREND"],
+      omittedFactors: [],
+      insufficiencyReasons: [],
+    };
+    engineServiceMock.evaluate.mockReturnValue(engineResult);
+
+    decisionRepositoryMock.createDecision
+      .mockResolvedValueOnce({ id: "dec-first", status: "PENDING" })
+      .mockResolvedValueOnce({ id: "dec-second", status: "PENDING" });
+    decisionRepositoryMock.completeDecision
+      .mockResolvedValueOnce({ id: "dec-first", publicId: "pub-first", status: "COMPLETED", result: "SELL_NOW" })
+      .mockResolvedValueOnce({ id: "dec-second", publicId: "pub-second", status: "COMPLETED", result: "SELL_NOW" });
+
+    const first = await orchestrationService.generateDecision("public-lot-1", "user-1");
+    const second = await orchestrationService.generateDecision("public-lot-1", "user-1");
+
+    expect(first.publicId).toBe("pub-first");
+    expect(second.publicId).toBe("pub-second");
+    expect(decisionRepositoryMock.createDecision).toHaveBeenCalledTimes(2);
+    expect(decisionRepositoryMock.completeDecision).toHaveBeenNthCalledWith(
+      1,
+      "dec-first",
+      "SELL_NOW",
+      0.9,
+      expect.any(Object),
+      expect.any(Object),
+      mockTimestamps.marketDataTimestamp,
+      mockTimestamps.storageDataTimestamp
+    );
+    expect(decisionRepositoryMock.completeDecision).toHaveBeenNthCalledWith(
+      2,
+      "dec-second",
+      "SELL_NOW",
+      0.9,
+      expect.any(Object),
+      expect.any(Object),
+      mockTimestamps.marketDataTimestamp,
+      mockTimestamps.storageDataTimestamp
+    );
+    expect(decisionRepositoryMock.failDecision).not.toHaveBeenCalled();
+  });
+
+  describe("audit logging (Part 7)", () => {
+    let auditServiceMock: { record: jest.Mock };
+
+    beforeEach(() => {
+      auditServiceMock = { record: jest.fn().mockResolvedValue(undefined) };
+      // 6th constructor argument: aiProvider defaults, auditService supplied.
+      orchestrationService = new SellStoreOrchestrationService(
+        lotsRepositoryMock,
+        decisionRepositoryMock,
+        resolverServiceMock,
+        engineServiceMock,
+        undefined,
+        auditServiceMock as any
+      );
+
+      lotsRepositoryMock.findByPublicId.mockResolvedValue(lotFixture);
+      resolverServiceMock.resolveDecisionInputs.mockResolvedValue(resolvedInputFixture);
+      decisionRepositoryMock.createDecision.mockResolvedValue({ id: "dec-audit", status: "PENDING" });
+
+      const engineResult: DecisionEngineResult = {
+        result: "STORE",
+        sellScore: 30,
+        storeScore: 70,
+        confidence: 0.8,
+        factorsUsed: ["MARKET_TREND"],
+        omittedFactors: [],
+        insufficiencyReasons: [],
+      };
+      engineServiceMock.evaluate.mockReturnValue(engineResult);
+      decisionRepositoryMock.completeDecision.mockResolvedValue({
+        id: "dec-audit",
+        publicId: "pub-dec-audit",
+        status: "COMPLETED",
+        result: "STORE",
+      });
+    });
+
+    it("10. Records SELL_STORE_DECISION_GENERATED after a successful decision", async () => {
+      const result = await orchestrationService.generateDecision("public-lot-1", "user-1");
+
+      expect(auditServiceMock.record).toHaveBeenCalledWith(
+        expect.objectContaining({
+          actorUserId: "user-1",
+          action: "SELL_STORE_DECISION_GENERATED",
+          entityType: "SellStoreDecision",
+          entityId: "pub-dec-audit",
+          metadata: expect.objectContaining({ lotPublicId: "public-lot-1", result: "STORE" }),
+        })
+      );
+      expect(result.publicId).toBe("pub-dec-audit");
+    });
+
+    it("11. An audit-logging failure does not fail the decision or propagate to the caller", async () => {
+      auditServiceMock.record.mockRejectedValue(new Error("audit sink unavailable"));
+
+      const result = await orchestrationService.generateDecision("public-lot-1", "user-1");
+
+      expect(result.status).toBe("COMPLETED");
+      expect(result.result).toBe("STORE");
+      expect(decisionRepositoryMock.failDecision).not.toHaveBeenCalled();
+    });
+
+    it("12. Does not audit-log when the decision fails before completion", async () => {
+      engineServiceMock.evaluate.mockImplementation(() => {
+        throw new Error("boom");
+      });
+
+      await expect(orchestrationService.generateDecision("public-lot-1", "user-1")).rejects.toThrow("boom");
+
+      expect(auditServiceMock.record).not.toHaveBeenCalled();
+    });
+
+    it("13. Does not audit-log routine historical reads", async () => {
+      decisionRepositoryMock.listByLotId.mockResolvedValue([]);
+      await orchestrationService.getDecisionsForLot("public-lot-1");
+
+      decisionRepositoryMock.findByPublicId.mockResolvedValue({
+        id: "dec-x",
+        publicId: "pub-x",
+        status: "COMPLETED",
+        result: "STORE",
+      });
+      await orchestrationService.getDecisionByPublicId("pub-x");
+
+      expect(auditServiceMock.record).not.toHaveBeenCalled();
+    });
+  });
 });

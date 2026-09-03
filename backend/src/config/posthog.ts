@@ -66,6 +66,12 @@ const ALLOWED_EVENTS = new Set([
   "decision_engine_completed",
   "historical_decision_viewed",
   "lot_history_viewed",
+  // Module 8 Part 6 — Sell vs Store AI Advisory Layer. Never includes the
+  // AI context, provider payload, or advisory text itself — only that a
+  // request happened, succeeded, or failed (with an error code).
+  "advisory_requested",
+  "advisory_success",
+  "advisory_failed",
 ]);
 
 // Defense in depth: even if a caller accidentally passes a sensitive key in

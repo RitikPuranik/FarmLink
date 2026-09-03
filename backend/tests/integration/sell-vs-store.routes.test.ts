@@ -323,4 +323,63 @@ describe("Sell vs Store Routes Integration", () => {
       expect(res.status).toBe(200);
     });
   });
+
+  describe("ROLE-based access control (Part 7)", () => {
+    const lotPublicId = "44444444-4444-4444-4444-444444444444";
+
+    it("16. A BUYER account cannot reach the analyze endpoint (403, not 404/500), and no lot lookup happens", async () => {
+      mockAuthRepo.findUserById.mockResolvedValue({
+        id: "buyer-1",
+        publicId: "pub-buyer-1",
+        role: "BUYER",
+        accountStatus: "ACTIVE",
+      });
+
+      const res = await request(app)
+        .post(`/api/sell-vs-store/lots/${lotPublicId}/analyze`)
+        .set("Authorization", authHeader);
+
+      expect(res.status).toBe(403);
+      expect(res.body.error.code).toBe("AUTHORIZATION_ERROR");
+      // Rejected before the controller does any lot work at all.
+      expect(mockLotsRepo.findByPublicId).not.toHaveBeenCalled();
+      expect(mockOrchestrator.generateDecision).not.toHaveBeenCalled();
+      // Matches the codebase-wide convention: a denied role is audited.
+      expect(mockAuditService.record).toHaveBeenCalledWith(
+        expect.objectContaining({ action: "AUTHORIZATION_DENIED", actorUserId: "buyer-1" })
+      );
+    });
+
+    it("17. A TRANSPORTER account cannot view lot history (403)", async () => {
+      mockAuthRepo.findUserById.mockResolvedValue({
+        id: "transporter-1",
+        publicId: "pub-transporter-1",
+        role: "TRANSPORTER",
+        accountStatus: "ACTIVE",
+      });
+
+      const res = await request(app)
+        .get(`/api/sell-vs-store/lots/${lotPublicId}/history`)
+        .set("Authorization", authHeader);
+
+      expect(res.status).toBe(403);
+      expect(mockOrchestrator.getDecisionsForLot).not.toHaveBeenCalled();
+    });
+
+    it("18. A WAREHOUSE_OPERATOR account cannot fetch a historical decision (403)", async () => {
+      mockAuthRepo.findUserById.mockResolvedValue({
+        id: "warehouse-1",
+        publicId: "pub-warehouse-1",
+        role: "WAREHOUSE_OPERATOR",
+        accountStatus: "ACTIVE",
+      });
+
+      const res = await request(app)
+        .get(`/api/sell-vs-store/decisions/33333333-3333-3333-3333-333333333333`)
+        .set("Authorization", authHeader);
+
+      expect(res.status).toBe(403);
+      expect(mockOrchestrator.getDecisionByPublicId).not.toHaveBeenCalled();
+    });
+  });
 });

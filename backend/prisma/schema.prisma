@@ -529,6 +529,9 @@ model Crop {
   // Module 8
   sellStoreDecisions SellStoreDecision[]
 
+  // Module 7 (Price Forecasting)
+  priceForecasts PriceForecast[]
+
   @@map("crops")
 }
 
@@ -1262,6 +1265,9 @@ model Mandi {
 
   prices MandiPrice[]
 
+  // Module 7 (Price Forecasting) — only set for MANDI-scoped forecasts.
+  priceForecasts PriceForecast[]
+
   @@unique([source, sourceMarketId])
   @@unique([source, normalizedName, district, state])
   @@index([state, district])
@@ -1551,4 +1557,125 @@ model SellStoreDecision {
   @@index([lotId, status])
   @@index([requestedByUserId])
   @@map("sell_store_decisions")
+}
+
+// ---------------------------------------------------------------------------
+// Module 7 — Price Forecasting: foundation & data model (Part 1)
+//
+// This part deliberately persists forecasts only — it does not generate
+// them. MandiPrice (Module 6) remains the single authoritative source of
+// historical price observations; PriceForecast never copies or duplicates
+// that history, it only records what a (future) forecasting run predicted
+// from it. See docs/modules/module-07-price-forecasting.md.
+// ---------------------------------------------------------------------------
+
+// What a forecast is predicting a price *for*. A forecast is always
+// generated for a single crop, plus exactly one of:
+//   MANDI      — one specific market (mandiId is set)
+//   REGIONAL   — a state, optionally narrowed to a district (regionState /
+//                regionDistrict are set, mandiId is null)
+//   CROP_WIDE  — the crop everywhere (no mandi/region set at all)
+// scopeType is stored explicitly (rather than only inferred from which
+// columns are null) so queries/branches never have to reverse-engineer
+// scope from null-checks, and so the meaning of "null mandiId" can never
+// silently drift.
+enum PriceForecastScopeType {
+  MANDI
+  REGIONAL
+  CROP_WIDE
+}
+
+// Deliberately its own enum rather than reusing SellStoreDecisionStatus
+// (Module 8) — that one has no GENERATING/INSUFFICIENT_DATA distinction a
+// forecast run needs, and the two lifecycles have nothing in common beyond
+// both being "did this computation finish OK".
+enum PriceForecastStatus {
+  GENERATING
+  COMPLETED
+  FAILED
+  INSUFFICIENT_DATA
+}
+
+// A single generated price prediction, persisted for reuse. Money fields
+// use Decimal (matching MandiPrice's INR/QTL convention, see that model's
+// comment) — never Float, so downstream arithmetic (Sell vs Store, future
+// UI) never inherits floating-point rounding error.
+//
+// Idempotency: a duplicate forecast for the same crop + scope + target
+// date + model version must not create a conflicting second row (build
+// spec requirement). A nullable mandiId/regionState/regionDistrict cannot
+// enforce that alone — Postgres unique indexes treat NULL as distinct from
+// NULL, so two CROP_WIDE rows (mandiId = NULL for both) would not collide.
+// `scopeKey` is a deterministic, NULL-free string encoding of scopeType +
+// its scope columns (built by modules/price-forecasting's scope helpers,
+// e.g. "MANDI:<mandiId>", "REGIONAL:<state>:<district|*>", "CROP_WIDE"),
+// and the unique constraint is keyed on it instead.
+model PriceForecast {
+  id       String @id @default(uuid())
+  publicId String @unique @default(uuid())
+
+  cropId String
+  crop   Crop   @relation(fields: [cropId], references: [id], onDelete: Restrict)
+
+  scopeType PriceForecastScopeType
+
+  // Set only when scopeType = MANDI. Restrict: a mandi reference row must
+  // never disappear out from under a historical forecast.
+  mandiId String?
+  mandi   Mandi?  @relation(fields: [mandiId], references: [id], onDelete: Restrict)
+
+  // Set only when scopeType = REGIONAL. regionDistrict is optional even
+  // within REGIONAL scope (a state-wide forecast has no district).
+  regionState    String?
+  regionDistrict String?
+
+  // See model comment — the collision-safe encoding of the three fields
+  // above, and what idempotency is actually enforced against.
+  scopeKey String
+
+  targetDate  DateTime @db.Date
+  horizonDays Int
+
+  predictedPrice  Decimal  @db.Decimal(14, 2)
+  lowerBound      Decimal? @db.Decimal(14, 2)
+  upperBound      Decimal? @db.Decimal(14, 2)
+  // 0-1 scale, matching Module 8's confidenceScore convention.
+  confidenceScore Decimal? @db.Decimal(4, 3)
+
+  status PriceForecastStatus @default(GENERATING)
+
+  // Free-text identifiers (not an enum) so a new model/provider never
+  // needs a migration — mirrors MandiPrice.source being a plain string for
+  // the same reason.
+  modelProvider String
+  modelVersion  String
+
+  // The historical window the (future) forecasting run actually read from
+  // MandiPrice to produce this prediction — an audit trail, never a second
+  // copy of the prices themselves.
+  inputDataStartDate DateTime? @db.Date
+  inputDataEndDate   DateTime? @db.Date
+  sampleCount        Int?
+
+  generatedAt DateTime  @default(now())
+  // A forecast past this timestamp is stale and should not be served as
+  // "latest valid" (see PriceForecastRepository.findLatestValid) — never
+  // auto-deleted, just excluded from that query.
+  expiresAt   DateTime?
+
+  // Safe, technical-only metadata (e.g. algorithm parameters, feature
+  // flags used) — never raw provider payloads or PII, mirroring
+  // QualityAIAnalysis.rawResultJson's own "sanitized, normalized shape
+  // only" rule.
+  metadata Json?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([cropId, scopeKey, targetDate, modelVersion])
+  @@index([cropId, targetDate])
+  @@index([cropId, mandiId, targetDate])
+  @@index([status])
+  @@index([expiresAt])
+  @@map("price_forecasts")
 }

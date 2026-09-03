@@ -11,6 +11,7 @@ describe("SellStoreDecisionRepository (Module 8)", () => {
       sellStoreDecision: {
         create: jest.fn(),
         findUnique: jest.fn(),
+        findMany: jest.fn(),
       },
     };
     repository = new SellStoreDecisionRepository(prismaMock as unknown as PrismaClient);
@@ -73,5 +74,17 @@ describe("SellStoreDecisionRepository (Module 8)", () => {
     
     expect(result.id).toBe("decision-123");
     expect(result.inputSnapshot).toEqual(snapshot);
+  });
+
+  it("listByLotId queries only COMPLETED decisions, newest first, with a bounded take (Part 7 hardening)", async () => {
+    prismaMock.sellStoreDecision.findMany.mockResolvedValue([]);
+
+    await repository.listByLotId("lot-1");
+
+    expect(prismaMock.sellStoreDecision.findMany).toHaveBeenCalledWith({
+      where: { lotId: "lot-1", status: "COMPLETED" },
+      orderBy: { createdAt: "desc" },
+      take: 200,
+    });
   });
 });

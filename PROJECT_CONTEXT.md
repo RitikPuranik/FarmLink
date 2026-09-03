@@ -19,8 +19,11 @@
 3. Module 3 — FPO Management & Farmer Aggregation: implemented
 4. Module 4 — Crop / Lot Management: implemented
 5. Module 5 — Quality Grading & Produce Assessment: implemented
+6. Module 6 — Market Intelligence & Price Discovery: implemented
+7. Module 7 — Buyer Management & Matching: implemented
+8. Module 8 — Sell vs Store Decision Engine: implemented (deterministic engine authoritative; optional/advisory-only AI layer — see `docs/modules/module-08-sell-vs-store.md`)
 
-Next planned business modules include Market Intelligence, Price Forecasting, Sell-vs-Store, Warehouse, Buyers, Buyer Matching, RFQ/Offers, Net Realization, Logistics, Shipment/Tracking, Delivery, Payment Status, Ledger, Grievance, Notifications, multilingual/voice/offline, Risk, Analytics, Admin/Government, integrations, audit/security/monitoring and AI platform capabilities.
+Next planned business modules include Price Forecasting, Warehouse, RFQ/Offers, Net Realization, Logistics, Shipment/Tracking, Delivery, Payment Status, Ledger, Grievance, Notifications, multilingual/voice/offline, Risk, Analytics, Admin/Government, integrations, and further audit/security/monitoring and AI platform capabilities.
 
 ## Backend — Actual Current Stack
 - Express.js 4.x
@@ -53,6 +56,9 @@ Next planned business modules include Market Intelligence, Price Forecasting, Se
 - `modules/fpo/` — Module 3 FPO registration/verification/admins, membership, aggregation, analytics, government summary
 - `modules/lots/` — Module 4 CropLot lifecycle (create/list/get/update/publish/cancel/history), farmer- and FPO-owned lots, quantity normalization, status state machine
 - `modules/quality/` — Module 5 QualityAssessment lifecycle (create/list/get/update/verify), flexible metrics/images/defects, AI provider abstraction (ai/), crop-agnostic grading engine
+- `modules/market-data/` and `modules/market-intelligence/` — Module 6 canonical INR/quintal price store (operator-only CLI import + optional data.gov.in sync) and the read-only analytics/recommendation API over it
+- `modules/buyer-matching/` — Module 7 buyer profiles/demands, deterministic lot matching, and auditable `TradeOffer` negotiation with atomic accept/withdraw
+- `modules/sell-vs-store/` — Module 8 deterministic Sell vs Store decision engine (input resolution -> scoring -> persistence), plus an optional, advisory-only AI layer (`ai/`) that can never override the deterministic result
 - `app.ts` — dependency-injected Express app factory
 - `server.ts` — composition root; only place that constructs the real PrismaClient
 

@@ -1,5 +1,6 @@
 import { Request, Response } from "express";
 import { NotFoundError } from "../../common/errors";
+import { sendSuccess } from "../../common/apiResponse";
 import { AuthenticatedUserContext } from "../auth/auth.types";
 import { FarmerProfileResolver } from "../farmers/farmer-profile.resolver";
 import { CropLotRepository } from "../lots/lots.repository";
@@ -50,7 +51,7 @@ export class SellStoreController {
     const decision = await this.orchestrator.generateDecision(lotPublicId, user.id);
     trackEvent("decision_engine_completed", user.id, { lotPublicId, result: decision.result });
 
-    res.json({ success: true, data: decision });
+    sendSuccess(res, decision);
   };
 
   getDecisionHistory = async (req: Request, res: Response) => {
@@ -61,7 +62,7 @@ export class SellStoreController {
 
     trackEvent("lot_history_viewed", user.id, { lotPublicId, module: "sell_vs_store" });
     const decisions = await this.orchestrator.getDecisionsForLot(lotPublicId);
-    res.json({ success: true, data: decisions });
+    sendSuccess(res, decisions);
   };
 
   getHistoricalDecision = async (req: Request, res: Response) => {
@@ -85,6 +86,6 @@ export class SellStoreController {
     }
 
     trackEvent("historical_decision_viewed", user.id, { lotPublicId: lot.publicId, decisionPublicId: publicId });
-    res.json({ success: true, data: decision });
+    sendSuccess(res, decision);
   };
 }

@@ -33,7 +33,18 @@ export function createSellStoreRouter(
   const router = Router();
   const controller = new SellStoreController(orchestrator, lots, lotAuth, farmers);
 
-  const { authenticate: authMw } = createAuthMiddleware(authRepo, auditService);
+  const { authenticate: authMw, requireAnyRole } = createAuthMiddleware(authRepo, auditService);
+
+  // Matches the RBAC convention used by every other lot-scoped module
+  // (quality, market-intelligence, lots): authentication alone is not
+  // sufficient — only roles that can plausibly own or manage a lot may
+  // reach these handlers. Ownership/FPO-management is still separately
+  // enforced per-lot in the controller (ensureAuthorizedForLot); this is
+  // the coarse role gate that runs first, matches other modules'
+  // AUTHORIZATION_DENIED audit trail for rejected roles (e.g. BUYER,
+  // TRANSPORTER, WAREHOUSE_OPERATOR), and avoids doing any DB work for a
+  // role that could never pass the ownership check anyway.
+  router.use(authMw, requireAnyRole("FARMER", "FPO_ADMIN", "ADMIN"));
 
   /**
    * @openapi
@@ -45,6 +56,11 @@ export function createSellStoreRouter(
    *       Analyzes market, quality, and storage context to generate a deterministic Sell vs Store decision.
    *       Requires authorization to access the lot (e.g. lot owner).
    *       Returns the exact inputs and scoring rules used. `INSUFFICIENT_DATA` is returned successfully if data is sparse.
+   *       The response additively includes `aiAdvisory` — an optional, advisory-only explanation of the
+   *       deterministic result (summary, reasoning, risks, considerations, data limitations, and whether the
+   *       AI agrees with the result). `aiAdvisory` is `null` whenever no AI provider is configured or the AI
+   *       attempt fails for any reason; it never affects `result`, the scores, or `decisionMetadata`, and it is
+   *       never persisted (historical decisions always return `aiAdvisory: null`).
    *     parameters:
    *       - name: lotPublicId
    *         in: path
@@ -53,18 +69,14 @@ export function createSellStoreRouter(
    *           type: string
    *           format: uuid
    *     responses:
-   *       200:
-   *         description: Decision generated successfully.
-   *       400:
-   *         description: Invalid lotPublicId format.
-   *       401:
-   *         description: Unauthorized.
-   *       404:
-   *         description: Lot not found or access denied.
+   *       200: { description: Decision generated successfully., content: { application/json: { schema: { $ref: '#/components/schemas/SuccessResponse' } } } }
+   *       400: { description: Invalid lotPublicId format., content: { application/json: { schema: { $ref: '#/components/schemas/ErrorResponse' } } } }
+   *       401: { description: Unauthorized., content: { application/json: { schema: { $ref: '#/components/schemas/ErrorResponse' } } } }
+   *       403: { description: Role is not permitted to use this endpoint., content: { application/json: { schema: { $ref: '#/components/schemas/ErrorResponse' } } } }
+   *       404: { description: Lot not found or access denied., content: { application/json: { schema: { $ref: '#/components/schemas/ErrorResponse' } } } }
    */
   router.post(
     "/lots/:lotPublicId/analyze",
-    authMw,
     validateParams(lotPublicIdParamSchema),
     asyncHandler(controller.generateDecision)
   );
@@ -84,18 +96,14 @@ export function createSellStoreRouter(
    *           type: string
    *           format: uuid
    *     responses:
-   *       200:
-   *         description: List of historical decisions.
-   *       400:
-   *         description: Invalid lotPublicId format.
-   *       401:
-   *         description: Unauthorized.
-   *       404:
-   *         description: Lot not found or access denied.
+   *       200: { description: List of historical decisions., content: { application/json: { schema: { $ref: '#/components/schemas/SuccessResponse' } } } }
+   *       400: { description: Invalid lotPublicId format., content: { application/json: { schema: { $ref: '#/components/schemas/ErrorResponse' } } } }
+   *       401: { description: Unauthorized., content: { application/json: { schema: { $ref: '#/components/schemas/ErrorResponse' } } } }
+   *       403: { description: Role is not permitted to use this endpoint., content: { application/json: { schema: { $ref: '#/components/schemas/ErrorResponse' } } } }
+   *       404: { description: Lot not found or access denied., content: { application/json: { schema: { $ref: '#/components/schemas/ErrorResponse' } } } }
    */
   router.get(
     "/lots/:lotPublicId/history",
-    authMw,
     validateParams(lotPublicIdParamSchema),
     asyncHandler(controller.getDecisionHistory)
   );
@@ -115,18 +123,14 @@ export function createSellStoreRouter(
    *           type: string
    *           format: uuid
    *     responses:
-   *       200:
-   *         description: Historical decision retrieved successfully.
-   *       400:
-   *         description: Invalid publicId format.
-   *       401:
-   *         description: Unauthorized.
-   *       404:
-   *         description: Decision or lot not found.
+   *       200: { description: Historical decision retrieved successfully., content: { application/json: { schema: { $ref: '#/components/schemas/SuccessResponse' } } } }
+   *       400: { description: Invalid publicId format., content: { application/json: { schema: { $ref: '#/components/schemas/ErrorResponse' } } } }
+   *       401: { description: Unauthorized., content: { application/json: { schema: { $ref: '#/components/schemas/ErrorResponse' } } } }
+   *       403: { description: Role is not permitted to use this endpoint., content: { application/json: { schema: { $ref: '#/components/schemas/ErrorResponse' } } } }
+   *       404: { description: Decision or lot not found., content: { application/json: { schema: { $ref: '#/components/schemas/ErrorResponse' } } } }
    */
   router.get(
     "/decisions/:publicId",
-    authMw,
     validateParams(decisionPublicIdParamSchema),
     asyncHandler(controller.getHistoricalDecision)
   );

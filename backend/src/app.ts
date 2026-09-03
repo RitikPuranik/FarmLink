@@ -48,6 +48,7 @@ import { DecisionInputResolverService } from "./modules/sell-vs-store/sell-store
 import { DecisionEngineService } from "./modules/sell-vs-store/sell-store-decision-engine.service";
 import { SellStoreOrchestrationService } from "./modules/sell-vs-store/sell-store-orchestration.service";
 import { createSellStoreRouter } from "./modules/sell-vs-store/sell-vs-store.routes";
+import { SellStoreAIProvider, UnavailableSellStoreAIProvider } from "./modules/sell-vs-store/ai/sell-store-ai.provider";
 import { LotsService } from "./modules/lots/lots.service";
 import { createFarmerLotsSummaryRouter, createFpoLotsRouter, createLotsRouter } from "./modules/lots/lots.routes";
 import { QualityRepository, QualityStandardRepository } from "./modules/quality/quality.repository";
@@ -95,6 +96,11 @@ export interface AppDependencies {
   // server.ts leaves this unset; tests can inject a fake "succeeds"/"low
   // confidence" provider to exercise paths the real default can't reach.
   qualityAiProvider?: QualityAIProvider;
+  // Module 8 Part 6 — Sell vs Store AI Advisory Layer. Same optional/default
+  // pattern as qualityAiProvider above: server.ts leaves this unset so the
+  // app defaults to UnavailableSellStoreAIProvider, and tests can inject a
+  // fake provider to exercise the success/failure advisory paths.
+  sellStoreAiProvider?: SellStoreAIProvider;
 }
 
 export function createApp(deps: AppDependencies): Express {
@@ -215,8 +221,13 @@ export function createApp(deps: AppDependencies): Express {
   );
 
   // Module 6 — read-only intelligence over the shared market-data store.
+  // Shared with Module 8's DecisionInputResolverService below — this is a
+  // thin, stateless wrapper over `deps.prisma` (see
+  // market-intelligence.repository.ts), so one instance is safe and
+  // avoids constructing a second identical object for the same data.
+  const marketIntelligenceRepository = new MarketIntelligenceRepository(deps.prisma);
   const marketIntelligenceService = new MarketIntelligenceService(
-    new MarketIntelligenceRepository(deps.prisma),
+    marketIntelligenceRepository,
     deps.cropLotRepository,
     lotAuthorization,
     farmerProfileResolver,
@@ -292,14 +303,21 @@ export function createApp(deps: AppDependencies): Express {
   const decisionInputResolverService = new DecisionInputResolverService(
     deps.cropLotRepository,
     deps.qualityRepository,
-    new MarketIntelligenceRepository(deps.prisma) // Reusing existing repository pattern
+    marketIntelligenceRepository // Reusing the same instance Module 6 uses above
   );
   const decisionEngineService = new DecisionEngineService();
+  // Module 8 Part 6: no real AI vendor is configured in this codebase —
+  // see UnavailableSellStoreAIProvider's own comment. Swap this one line
+  // for a real provider implementation later without touching
+  // SellStoreOrchestrationService.
+  const sellStoreAiProvider = deps.sellStoreAiProvider ?? new UnavailableSellStoreAIProvider();
   const sellStoreOrchestrationService = new SellStoreOrchestrationService(
     deps.cropLotRepository,
     sellStoreDecisionRepository,
     decisionInputResolverService,
-    decisionEngineService
+    decisionEngineService,
+    sellStoreAiProvider,
+    deps.auditService
   );
 
   app.use(

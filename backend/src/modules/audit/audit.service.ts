@@ -82,7 +82,12 @@ export type AuditAction =
   | "TRADE_OFFER_ACCEPTED"
   | "TRADE_OFFER_REJECTED"
   | "TRADE_OFFER_WITHDRAWN"
-  | "TRADE_OFFER_QUANTITY_COMMITTED";
+  | "TRADE_OFFER_QUANTITY_COMMITTED"
+  // Module 8 — Sell vs Store Decision Engine. One entry per persisted
+  // decision (mirrors MARKET_RECOMMENDATION_GENERATED above); historical
+  // reads (getDecisionByPublicId/getDecisionsForLot) are routine reads and
+  // are intentionally not audited, same reasoning as Module 6's chart reads.
+  | "SELL_STORE_DECISION_GENERATED";
 
 export interface AuditEvent {
   actorUserId?: string | null;
