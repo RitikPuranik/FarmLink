@@ -38,6 +38,18 @@ export type ErrorCode =
   | "REQUIRED_QUANTITY_BELOW_COMMITTED"
   | "INVALID_PRICE"
   | "QUALITY_REQUIREMENTS_INVALID"
+  // Module 9 — Warehouse Intelligence (Part 2: Storage Availability &
+  // Capacity Management). INVALID_LOCATION, INVALID_QUANTITY, and
+  // UNSUPPORTED_UNIT above are reused as-is (same meaning as Module 6/7's
+  // own use of them) rather than duplicated under a Warehouse-specific
+  // name.
+  | "WAREHOUSE_NOT_FOUND"
+  | "STORAGE_UNIT_NOT_FOUND"
+  | "INVALID_RADIUS"
+  | "INVALID_CAPACITY"
+  | "INSUFFICIENT_STORAGE_CAPACITY"
+  | "STORAGE_COMPATIBILITY_UNKNOWN"
+  | "CROP_NOT_SUPPORTED_BY_WAREHOUSE"
   | "UNEXPECTED_ERROR";
 
 export class AppError extends Error {
@@ -112,6 +124,36 @@ export class MarketDomainError extends AppError {
   constructor(
     message: string,
     code: Exclude<ErrorCode, "VALIDATION_ERROR" | "AUTHENTICATION_ERROR" | "INVALID_CREDENTIALS" | "AUTHORIZATION_ERROR" | "NOT_FOUND" | "CONFLICT" | "RATE_LIMITED" | "DATABASE_ERROR" | "UNEXPECTED_ERROR">,
+    statusCode = 422,
+  ) {
+    super(message, statusCode, code);
+  }
+}
+
+/**
+ * Module 9's equivalent of MarketDomainError — kept as its own named class
+ * rather than reusing MarketDomainError under a misleading name (unlike
+ * buyer-matching's `domain()`/lots' reuse of it), since a reviewer
+ * grepping for warehouse errors should find a warehouse-named class.
+ * Defaults to 422 for business-rule violations; WAREHOUSE_NOT_FOUND and
+ * STORAGE_UNIT_NOT_FOUND should pass statusCode 404 explicitly.
+ */
+export class WarehouseDomainError extends AppError {
+  constructor(
+    message: string,
+    code: Extract<
+      ErrorCode,
+      | "WAREHOUSE_NOT_FOUND"
+      | "STORAGE_UNIT_NOT_FOUND"
+      | "INVALID_LOCATION"
+      | "INVALID_RADIUS"
+      | "INVALID_CAPACITY"
+      | "INVALID_QUANTITY"
+      | "UNSUPPORTED_UNIT"
+      | "INSUFFICIENT_STORAGE_CAPACITY"
+      | "STORAGE_COMPATIBILITY_UNKNOWN"
+      | "CROP_NOT_SUPPORTED_BY_WAREHOUSE"
+    >,
     statusCode = 422,
   ) {
     super(message, statusCode, code);

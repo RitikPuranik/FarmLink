@@ -88,14 +88,10 @@ export type AuditAction =
   // reads (getDecisionByPublicId/getDecisionsForLot) are routine reads and
   // are intentionally not audited, same reasoning as Module 6's chart reads.
   | "SELL_STORE_DECISION_GENERATED"
-  // Module 7 — Price Forecasting. One entry per successfully persisted
-  // (COMPLETED) forecast generation, same "one entry per generated
-  // artifact" convention as MARKET_RECOMMENDATION_GENERATED/
-  // SELL_STORE_DECISION_GENERATED above. Reused/insufficient-data outcomes
-  // and every read endpoint (get/list/latest) are intentionally not
-  // audited — routine reads, same reasoning as Module 6/8's chart/history
-  // reads.
-  | "PRICE_FORECAST_GENERATED";
+  // Module 9 Part 2 — Warehouse Intelligence. Only capacity mutations are
+  // audited; nearby search and availability reads are routine reads, same
+  // reasoning as Module 6/8's own read-vs-write audit split above.
+  | "WAREHOUSE_CAPACITY_UPDATED";
 
 export interface AuditEvent {
   actorUserId?: string | null;

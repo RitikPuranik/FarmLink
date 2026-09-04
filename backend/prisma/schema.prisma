@@ -257,6 +257,11 @@ model User {
   // Module 8
   sellStoreDecisions SellStoreDecision[]
 
+  // Module 9 — a WAREHOUSE_OPERATOR (or any user acting individually,
+  // never trusted from role alone — see WarehouseOwnerType) may own zero
+  // or more warehouses directly, as opposed to warehouses owned by an Fpo.
+  ownedWarehouses Warehouse[]
+
   @@index([mobile])
   @@index([email])
   @@index([publicId])
@@ -491,6 +496,10 @@ model Fpo {
   // own comment.
   cropLots CropLot[]
 
+  // Module 9 — warehouses owned by this FPO (mirrors User.ownedWarehouses;
+  // see WarehouseOwnerType for why exactly one of the two is ever set).
+  ownedWarehouses Warehouse[]
+
   @@index([stateId])
   @@index([districtId])
   @@index([talukaId])
@@ -531,6 +540,12 @@ model Crop {
 
   // Module 7 (Price Forecasting)
   priceForecasts PriceForecast[]
+
+  // Module 9 — configured warehouse storage capabilities/rates for this
+  // crop. Never AI-generated facts about the crop itself — see
+  // WarehouseCropCapability's own comment.
+  warehouseCapabilities WarehouseCropCapability[]
+  storageRates          StorageRate[]
 
   @@map("crops")
 }
@@ -890,6 +905,11 @@ model CropLot {
 
   // Module 8
   sellStoreDecisions SellStoreDecision[]
+
+  // Module 9 — every storage reservation ever created against this lot
+  // (foundation only in Part 1: no reservation actually adjusts
+  // availableQuantityKg yet — see StorageReservation's own comment).
+  storageReservations StorageReservation[]
 
   @@index([farmerId, status])
   @@index([fpoId, status])
@@ -1678,4 +1698,318 @@ model PriceForecast {
   @@index([status])
   @@index([expiresAt])
   @@map("price_forecasts")
+}
+
+// ---------------------------------------------------------------------------
+// Module 9 — Warehouse Intelligence
+// Part 1: Foundation & Data Model
+//
+// Scope of this part: the domain model + repository layer only. No APIs,
+// controllers, routes, capacity-allocation logic, cost calculation, or
+// integration with Module 8 (Sell vs Store) yet — see the repository
+// interfaces in warehouse-intelligence/ for exactly which operations
+// exist today.
+//
+// Relationship shape:
+//
+//   User / Fpo (exactly one, see WarehouseOwnerType)
+//     └── Warehouse
+//           ├── WarehouseStorageUnit[]      — chambers/sections
+//           ├── WarehouseCropCapability[]   — configured, not AI-derived
+//           ├── StorageReservation[]        — foundation only, no capacity
+//           │                                 math yet (see model comment)
+//           └── StorageRate[]               — configured pricing, no cost
+//                                              calculation yet
+//
+//   CropLot ── StorageReservation[]
+//   Crop    ── WarehouseCropCapability[], StorageRate[]
+// ---------------------------------------------------------------------------
+
+enum WarehouseStatus {
+  ACTIVE
+  INACTIVE
+  SUSPENDED
+}
+
+// Who owns this warehouse — deliberately its own enum, mirroring
+// LotOwnerType's rationale: "who owns this warehouse" is unrelated to any
+// other lifecycle enum, and exactly one of ownerUserId/ownerFpoId is set
+// to match. Not enforced at the database level (Postgres has no portable
+// XOR-on-two-nullable-columns constraint that matches the rest of this
+// project's conventions) — enforced in the future service layer the same
+// way CropLot's farmerId/fpoId pairing is, never trusted from the request
+// body.
+enum WarehouseOwnerType {
+  USER
+  FPO
+}
+
+// Shared between Warehouse.warehouseType (what kind of facility this is
+// overall) and WarehouseStorageUnit.storageType (what kind of storage a
+// specific chamber/section provides) — one enum rather than two near-
+// identical ones, per the "do not create redundant enums" instruction.
+enum StorageType {
+  AMBIENT
+  COLD_STORAGE
+  CONTROLLED_ATMOSPHERE
+  SILO
+  WAREHOUSE_GODOWN
+  OTHER
+}
+
+// Configured compatibility, not a computed/AI-derived fact (build spec for
+// this part: "represent configured capabilities, not AI-generated facts").
+enum CropStorageCompatibility {
+  COMPATIBLE
+  NOT_RECOMMENDED
+  INCOMPATIBLE
+}
+
+enum StorageReservationStatus {
+  PENDING
+  CONFIRMED
+  CANCELLED
+  EXPIRED
+  COMPLETED
+}
+
+enum StorageRateType {
+  PER_DAY
+  PER_WEEK
+  PER_MONTH
+  PER_QUANTITY_PER_DAY
+}
+
+model Warehouse {
+  id       String @id @default(uuid())
+  publicId String @unique @default(uuid())
+
+  ownerType   WarehouseOwnerType
+  ownerUserId String?
+  ownerFpoId  String?
+
+  name          String
+  warehouseType StorageType @default(AMBIENT)
+
+  state   String
+  district String
+  address String?
+
+  latitude  Float?
+  longitude Float?
+
+  // Reuses Module 1's VerificationStatus (PENDING/VERIFIED/REJECTED/
+  // EXPIRED) rather than a bespoke warehouse enum — "verification should
+  // not be fabricated if a reusable enum already exists".
+  verificationStatus VerificationStatus @default(PENDING)
+
+  // status is the lifecycle enum (ACTIVE/INACTIVE/SUSPENDED — the only
+  // one of the two that can express "an admin suspended this warehouse").
+  // isActive is a fast, denormalized listing/filter flag in the same
+  // spirit as Fpo.active — kept in sync with status by the future service
+  // layer, never derived automatically inside this repository layer.
+  status   WarehouseStatus @default(ACTIVE)
+  isActive Boolean         @default(true)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  // Restrict, not Cascade/SetNull: an owning user/FPO record must never
+  // disappear out from under a warehouse record, mirroring CropLot's
+  // farmer/fpo relations.
+  ownerUser User? @relation(fields: [ownerUserId], references: [id], onDelete: Restrict)
+  ownerFpo  Fpo?  @relation(fields: [ownerFpoId], references: [id], onDelete: Restrict)
+
+  storageUnits WarehouseStorageUnit[]
+  capabilities WarehouseCropCapability[]
+  reservations StorageReservation[]
+  rates        StorageRate[]
+
+  @@index([ownerUserId])
+  @@index([ownerFpoId])
+  @@index([state, district])
+  @@index([status])
+  @@index([verificationStatus])
+  @@index([createdAt])
+  // Module 9 Part 2 — supports the nearby-warehouse bounding-box query
+  // (WarehouseRepository.findNearbyCandidates) the same way Mandi never
+  // needed one: Module 6 never bounded its candidate set in SQL (it loads
+  // every market row — see market-intelligence.repository.ts's own
+  // comment trail), but this part's explicit "avoid loading every
+  // warehouse in the database" requirement means the box filter runs in
+  // the WHERE clause here, so it needs an index to stay a seek rather
+  // than a scan as the warehouses table grows.
+  @@index([latitude, longitude])
+  @@map("warehouses")
+}
+
+model WarehouseStorageUnit {
+  id          String @id @default(uuid())
+  publicId    String @unique @default(uuid())
+  warehouseId String
+
+  // Short human-facing section/chamber label, e.g. "Chamber A" or "CS-1" —
+  // unique per warehouse, not globally (a farmer/buyer only ever sees it
+  // in the context of its warehouse).
+  code        String
+  storageType StorageType @default(AMBIENT)
+
+  // Capacity is Decimal, never floating-point (this part's explicit data
+  // integrity requirement) — mirrors CropLot.quantityKg/
+  // availableQuantityKg's own Decimal(14,2) convention.
+  totalCapacity     Decimal      @db.Decimal(14, 2)
+  availableCapacity Decimal      @db.Decimal(14, 2)
+  capacityUnit      QuantityUnit @default(KG)
+
+  temperatureControlled Boolean  @default(false)
+  minTemperature        Decimal? @db.Decimal(5, 2)
+  maxTemperature        Decimal? @db.Decimal(5, 2)
+
+  humidityControlled Boolean  @default(false)
+  minHumidity        Decimal? @db.Decimal(5, 2)
+  maxHumidity        Decimal? @db.Decimal(5, 2)
+
+  isActive Boolean @default(true)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  // Cascade here (unlike the Restrict used for reservations/rates below):
+  // a storage unit is a physical sub-component of its warehouse with no
+  // independent lifecycle, whereas reservations and rates are
+  // transactional/historical records that must never silently vanish.
+  warehouse Warehouse @relation(fields: [warehouseId], references: [id], onDelete: Cascade)
+
+  capabilities WarehouseCropCapability[]
+  reservations StorageReservation[]
+  rates        StorageRate[]
+
+  @@unique([warehouseId, code])
+  @@index([warehouseId])
+  @@index([storageType])
+  @@map("warehouse_storage_units")
+}
+
+// Configured "can crop X be stored here" capability — a plain join/config
+// table (no publicId, matching FarmerCrop's convention for this kind of
+// row) rather than a computed or AI-inferred fact.
+model WarehouseCropCapability {
+  id String @id @default(uuid())
+
+  warehouseId String
+  // Optional narrower scope: null means "applies warehouse-wide", a set
+  // value means "applies only to this specific storage unit". Note:
+  // Postgres composite unique indexes do not deduplicate across NULLs, so
+  // @@unique below only prevents duplicates for a given concrete
+  // storageUnitId — preventing a duplicate warehouse-wide (storageUnitId
+  // null) row for the same crop is left to the future service layer, the
+  // same way ownerType/ownerUserId/ownerFpoId pairing is.
+  storageUnitId String?
+  cropId        String
+
+  compatibility CropStorageCompatibility @default(COMPATIBLE)
+
+  // Optional configured guidance, never computed here (this part's
+  // explicit "do not invent scientific storage conditions" instruction).
+  maxStorageDurationDays       Int?
+  storageConditions            String?
+  estimatedSpoilageRatePercent Decimal? @db.Decimal(5, 2)
+
+  metadata Json?
+  isActive Boolean @default(true)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  warehouse   Warehouse             @relation(fields: [warehouseId], references: [id], onDelete: Cascade)
+  storageUnit WarehouseStorageUnit? @relation(fields: [storageUnitId], references: [id], onDelete: Cascade)
+  // Restrict: a crop reference row must never disappear out from under a
+  // configured capability, mirroring FarmerCrop.crop/CropLot.crop.
+  crop        Crop                  @relation(fields: [cropId], references: [id], onDelete: Restrict)
+
+  @@unique([warehouseId, storageUnitId, cropId])
+  @@index([warehouseId])
+  @@index([storageUnitId])
+  @@index([cropId])
+  @@map("warehouse_crop_capabilities")
+}
+
+// Foundation only (this part's explicit scope limit): a record that
+// capacity is intended to be reserved, not an atomic capacity-allocation
+// mechanism. Nothing decrements WarehouseStorageUnit.availableCapacity in
+// Part 1 — that concurrency-safe transaction is future work, mirroring how
+// CropLot.adjustAvailableQuantity() was itself built as a guarded atomic
+// primitive only once it was actually wired to a caller.
+model StorageReservation {
+  id       String @id @default(uuid())
+  publicId String @unique @default(uuid())
+
+  warehouseId    String
+  storageUnitId  String?
+  lotId          String
+
+  quantity Decimal      @db.Decimal(14, 2)
+  unit     QuantityUnit @default(KG)
+
+  status StorageReservationStatus @default(PENDING)
+
+  reservedFrom  DateTime
+  reservedUntil DateTime?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  // Restrict throughout: a reservation is a transactional record that must
+  // never disappear out from under its warehouse, storage unit, or lot.
+  warehouse   Warehouse             @relation(fields: [warehouseId], references: [id], onDelete: Restrict)
+  storageUnit WarehouseStorageUnit? @relation(fields: [storageUnitId], references: [id], onDelete: Restrict)
+  lot         CropLot               @relation(fields: [lotId], references: [id], onDelete: Restrict)
+
+  @@index([warehouseId, status])
+  @@index([storageUnitId, status])
+  @@index([lotId])
+  @@index([status])
+  @@index([reservedFrom])
+  @@index([reservedUntil])
+  @@map("storage_reservations")
+}
+
+// Foundation only: configured pricing data. No cost calculation happens
+// here or anywhere in Part 1 — that reads these rows in a future part.
+model StorageRate {
+  id       String @id @default(uuid())
+  publicId String @unique @default(uuid())
+
+  warehouseId   String
+  storageUnitId String?
+  // Null means "applies to any crop at this warehouse/unit" — a specific
+  // crop row overrides it (resolution order is future-part logic; this
+  // part only stores the rows).
+  cropId        String?
+
+  rateType   StorageRateType
+  rateAmount Decimal         @db.Decimal(10, 2)
+  // No other model in this schema carries a currency column (the project
+  // is INR-only) — kept here anyway since the spec for this part calls
+  // for it explicitly; defaults to "INR" so every existing/future query
+  // can still assume INR without reading this column.
+  currency   String          @default("INR")
+  billingUnit QuantityUnit   @default(KG)
+
+  effectiveFrom  DateTime
+  effectiveUntil DateTime?
+  isActive       Boolean   @default(true)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  warehouse   Warehouse             @relation(fields: [warehouseId], references: [id], onDelete: Restrict)
+  storageUnit WarehouseStorageUnit? @relation(fields: [storageUnitId], references: [id], onDelete: Restrict)
+  crop        Crop?                 @relation(fields: [cropId], references: [id], onDelete: Restrict)
+
+  @@index([warehouseId, isActive])
+  @@index([storageUnitId])
+  @@index([cropId])
+  @@index([effectiveFrom, effectiveUntil])
+  @@map("storage_rates")
 }

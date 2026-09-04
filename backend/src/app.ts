@@ -68,13 +68,11 @@ import { MarketIntelligenceService } from "./modules/market-intelligence/market-
 import { createMarketIntelligenceRouter } from "./modules/market-intelligence/market-intelligence.routes";
 import { BuyerMatchingService } from "./modules/buyer-matching/buyer-matching.service";
 import { createBuyerMatchingRouter } from "./modules/buyer-matching/buyer-matching.routes";
-import { PriceHistoryRepository } from "./modules/price-forecasting/price-history.repository";
-import { PriceHistoryPreparationService } from "./modules/price-forecasting/price-history-preparation.service";
-import { BaselineForecastEngine } from "./modules/price-forecasting/price-forecasting.engine";
-import { PriceForecastRepository } from "./modules/price-forecasting/price-forecasting.repository";
-import { PriceForecastGenerationService } from "./modules/price-forecasting/price-forecast-generation.service";
-import { PriceForecastingService } from "./modules/price-forecasting/price-forecasting.service";
-import { createPriceForecastingRouter } from "./modules/price-forecasting/price-forecasting.routes";
+import { PrismaWarehouseRepository } from "./modules/warehouse-intelligence/warehouse.repository";
+import { PrismaWarehouseStorageRepository } from "./modules/warehouse-intelligence/warehouse-storage.repository";
+import { PrismaWarehouseCapabilityRepository } from "./modules/warehouse-intelligence/warehouse-capability.repository";
+import { WarehouseAvailabilityService } from "./modules/warehouse-intelligence/warehouse-availability.service";
+import { createWarehouseIntelligenceRouter } from "./modules/warehouse-intelligence/warehouse-intelligence.routes";
 
 export interface AppDependencies {
   authRepository: AuthRepository;
@@ -248,25 +246,18 @@ export function createApp(deps: AppDependencies): Express {
     deps.auditService,
   );
 
-  // Module 7 — Price Forecasting (deterministic baseline; see
-  // modules/price-forecasting for Parts 1-6). Depends only on Module 6's
-  // shared marketIntelligenceRepository instance above for crop/mandi
-  // lookups — never touches MandiPrice directly outside its own
-  // PriceHistoryRepository, and never modifies Module 6's tables.
-  const priceHistoryRepository = new PriceHistoryRepository(deps.prisma);
-  const priceHistoryPreparationService = new PriceHistoryPreparationService(priceHistoryRepository);
-  const baselineForecastEngine = new BaselineForecastEngine();
-  const priceForecastRepository = new PriceForecastRepository(deps.prisma);
-  const priceForecastGenerationService = new PriceForecastGenerationService(
-    priceHistoryPreparationService,
-    baselineForecastEngine,
-    priceForecastRepository,
-  );
-  const priceForecastingService = new PriceForecastingService(
-    priceForecastGenerationService,
-    priceForecastRepository,
-    marketIntelligenceRepository,
-    deps.prisma,
+  // Module 9 Part 2 — Warehouse Intelligence. Same "thin wrapper over
+  // deps.prisma, constructed inline" pattern as marketIntelligenceRepository
+  // above rather than an AppDependencies field, since Part 1 established
+  // these as plain Prisma-backed repositories with no test-fake need yet.
+  const warehouseRepository = new PrismaWarehouseRepository(deps.prisma);
+  const warehouseStorageRepository = new PrismaWarehouseStorageRepository(deps.prisma);
+  const warehouseCapabilityRepository = new PrismaWarehouseCapabilityRepository(deps.prisma);
+  const warehouseAvailabilityService = new WarehouseAvailabilityService(
+    warehouseRepository,
+    warehouseStorageRepository,
+    warehouseCapabilityRepository,
+    referenceDataService,
     deps.auditService,
   );
 
@@ -326,11 +317,9 @@ export function createApp(deps: AppDependencies): Express {
     createMarketIntelligenceRouter(marketIntelligenceService, deps.authRepository, deps.auditService),
   );
   app.use("/api", createBuyerMatchingRouter(buyerMatchingService, deps.authRepository, deps.auditService));
-
-  // Module 7 — Price Forecasting.
   app.use(
-    "/api/price-forecasting",
-    createPriceForecastingRouter(priceForecastingService, deps.authRepository, deps.auditService),
+    "/api/warehouses",
+    createWarehouseIntelligenceRouter(warehouseAvailabilityService, deps.authRepository, deps.auditService),
   );
 
   // Module 8 — Sell vs Store Decision Engine
