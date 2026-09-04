@@ -85,4 +85,58 @@ export const PRICE_FORECAST_CONFIG = {
    *  meaningful — below this many observations, every point is left
    *  unflagged rather than risk false positives on a handful of prices. */
   OUTLIER_MIN_SAMPLE_SIZE: 5,
+
+  // ── Baseline forecasting algorithm (Module 7 Part 3) ────────────────
+  /** How many of the most recent usable observations feed the weighted
+   *  moving average baseline and the trend regression — the algorithm's
+   *  Step 1/2/3 (see price-forecasting.engine.ts) all share this one
+   *  window rather than each picking a different lookback. */
+  MOVING_AVERAGE_WINDOW_SIZE: 14,
+
+  /** Fewest observations *within the selected window* needed before a
+   *  trend slope is fit at all — below this, trend is treated as
+   *  FLAT/zero rather than fitting a regression line through noise. Also
+   *  what the outlier policy below checks before deciding whether
+   *  excluding flagged outliers still leaves enough points to trust. */
+  MIN_OBSERVATIONS_FOR_TREND: 5,
+
+  /** Daily trend slope, as a fraction of the baseline price, below which
+   *  the trend is classified FLAT rather than UP/DOWN — keeps tiny
+   *  numerical noise from being reported as a directional signal. */
+  TREND_FLAT_THRESHOLD_RATIO: 0.0005,
+
+  /** Hard cap on the *raw* daily trend slope, as a fraction of the
+   *  baseline price, applied before horizon damping — the first of two
+   *  independent safeguards (paired with MAX_PROJECTION_PERCENT) against
+   *  unrealistic extrapolation from a single steep day-to-day move. */
+  MAX_DAILY_TREND_ADJUSTMENT_RATIO: 0.01,
+
+  /** Half-life (in days) of the damping applied to the trend's
+   *  contribution as the forecast horizon grows — the longer the
+   *  horizon, the more conservative the trend projection becomes (build
+   *  spec section 7). At `horizonDays === this value`, the daily slope's
+   *  effective contribution is discounted by half. */
+  TREND_DAMPING_HALF_LIFE_DAYS: 7,
+
+  /** Hard ceiling on how far the (capped, damped) trend projection may
+   *  move the predicted price away from the baseline, as a fraction of
+   *  the baseline price — applies regardless of horizon. */
+  MAX_PROJECTION_PERCENT: 0.25,
+
+  /** Multiplies the horizon-scaled historical dispersion (standard
+   *  deviation of the same recent window the baseline/trend use) to
+   *  produce the uncertainty half-width. */
+  UNCERTAINTY_MULTIPLIER: 1.5,
+
+  /** Floor on the uncertainty half-width, as a fraction of the predicted
+   *  price, so a forecast never reports a suspiciously narrow (falsely
+   *  precise) interval even after an unusually stable recent window. */
+  MIN_UNCERTAINTY_RATIO: 0.02,
+
+  /** Half-life (in days) of the horizon-based confidence decay — mirrors
+   *  TREND_DAMPING_HALF_LIFE_DAYS's shape but kept as an independent
+   *  knob, since "how fast the trend projection gets conservative" and
+   *  "how fast confidence drops with horizon" are separate judgment
+   *  calls. */
+  CONFIDENCE_HORIZON_DECAY_HALF_LIFE_DAYS: 14,
 } as const;

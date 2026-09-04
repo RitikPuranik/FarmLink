@@ -14,8 +14,9 @@ of.
 | Part | Scope | Status |
 | --- | --- | --- |
 | 1 | Foundation & data model | Done |
-| 2 | Historical data preparation (this document) | Done |
-| 3+ | Actual forecasting algorithm, scheduled generation, API endpoints, Sell vs Store integration | Not implemented |
+| 2 | Historical data preparation | Done |
+| 3 | Deterministic baseline forecasting algorithm (this document) | Done |
+| 4+ | Scheduled generation, API endpoints, Sell vs Store integration | Not implemented |
 
 ## MandiPrice remains the authoritative historical source
 
@@ -331,26 +332,244 @@ median, gap, coverage, and outlier calculation is a pure function in
 `price-history.aggregation.ts`, independently tested with no mocked
 database.
 
+## Part 3 — Deterministic baseline forecasting algorithm
+
+Part 3 turns Part 2's prepared, deterministic time series into an actual
+price prediction — a transparent, explainable statistical baseline, never
+an LLM, a general-purpose ML library, or a guarantee of future prices.
+This is the first part of Module 7 that produces `PriceForecast` rows with
+real `predictedPrice`/`lowerBound`/`upperBound` values rather than just
+the `GENERATING` placeholder Part 1 leaves behind.
+
+### What this is (and isn't)
+
+The algorithm is:
+
+- a **weighted moving average** of the most recent, usable observations
+  (recent prices weighted more heavily than older ones), giving a
+  **baseline price**;
+- plus a **conservatively projected linear trend** (ordinary least
+  squares over day-offsets, capped and damped so it can never
+  extrapolate wildly), giving a **trend adjustment**;
+- plus a **deterministic uncertainty range** derived from the same
+  window's historical price dispersion, scaled by the forecast horizon.
+
+It is explicitly **not** ARIMA, Prophet, a neural network, or any other
+statistical/ML forecasting library, and **not** an LLM/AI provider
+integration (no Gemini, OpenAI, or similar). Same input always produces
+the same output — every step is a pure function with no randomness, no
+external calls, and no hidden state.
+
+### Files
+
+| File | Role |
+| --- | --- |
+| `price-forecasting.math.ts` | Pure math only: `weightedMovingAverage`, `linearRegression`, `trendDirection`, `standardDeviation`, `trendDampingFactor`, `clampDailySlope`, `projectForecast`, `computeUncertaintyRange`. No I/O, no config lookups — every value a caller needs is passed in as a plain argument. |
+| `price-forecasting.engine.types.ts` | The engine's own output contract (`BaselineForecastResult`, `BaselineForecastMetadata`) plus the `BASELINE_MODEL_PROVIDER`/`BASELINE_MODEL_VERSION` identity constants. |
+| `price-forecasting.engine.ts` | `BaselineForecastEngine` — a pure, deterministic class (mirrors `DecisionEngineService`, Module 8) that combines the math functions above over a `PreparedPriceHistory` to produce a `BaselineForecastResult`. No I/O. |
+| `price-forecast-generation.service.ts` | `PriceForecastGenerationService` — orchestration only (mirrors `SellStoreOrchestrationService`, Module 8): resolves history via `PriceHistoryPreparationService`, calls the engine, and persists the result through `PriceForecastRepository`'s existing lifecycle methods. |
+
+### The algorithm, step by step
+
+1. **Sufficiency gate.** The engine trusts `PreparedPriceHistory.sufficient`
+   / `insufficiencyReasons` outright — it never re-derives or duplicates
+   Part 1/2's sufficiency logic. `sufficient: false` (for *any* reason,
+   including `HORIZON_EXCEEDS_LIMIT`) short-circuits straight to a
+   structured `INSUFFICIENT_DATA` result.
+2. **Outlier policy.** Part 2's `isOutlier` flags are statistically-flagged
+   metadata only — nothing is ever removed from `PreparedPriceHistory`
+   itself. The engine builds its own working set from them: exclude
+   flagged outliers **when doing so still leaves at least
+   `MIN_OBSERVATIONS_FOR_TREND` observations**; otherwise fall back to the
+   full valid series (outliers included) rather than starve the model of
+   data. This one policy decision feeds *every* downstream calculation —
+   baseline, trend, and dispersion alike — so a forecast's uncertainty
+   reflects the same evidence its point prediction was built from. The
+   choice actually taken (`"EXCLUDED"` or `"INCLUDED_FALLBACK"`) is
+   recorded in the persisted metadata.
+3. **Recent window.** From that working set, the most recent
+   `min(MOVING_AVERAGE_WINDOW_SIZE, available)` observations are selected
+   — the shared basis for both the moving average and the trend, per the
+   build spec's own step ordering.
+4. **Baseline — weighted moving average.** `weightedMovingAverage` assigns
+   rank-based weights (oldest = 1 ... newest = n, normalized by
+   construction) rather than time-decay weights, so it stays correct on
+   an irregularly-spaced series (Part 2 never fills gaps).
+5. **Trend — OLS linear regression.** Only computed when the recent window
+   has at least `MIN_OBSERVATIONS_FOR_TREND` points; below that, slope is
+   treated as `0` (FLAT) rather than fitting a line through noise.
+   Regression `x` is a **day-offset** from the window's first
+   observation, not an array index, so the fitted slope is genuine
+   "price change per calendar day" even with gaps in between.
+   `trendDirection` classifies the slope UP/DOWN/FLAT relative to the
+   baseline price, using `TREND_FLAT_THRESHOLD_RATIO` to keep tiny
+   numerical noise from being reported as a signal.
+6. **Conservative trend projection.** `projectForecast` applies three
+   independent safeguards, in order, against unrealistic extrapolation:
+   1. the raw daily slope is capped to `MAX_DAILY_TREND_ADJUSTMENT_RATIO`
+      of the baseline price per day;
+   2. the capped slope is **damped** by how long the horizon is
+      (`trendDampingFactor`, a half-life curve — at
+      `horizonDays === TREND_DAMPING_HALF_LIFE_DAYS` the daily
+      contribution is already discounted by half) before being
+      multiplied out over the full horizon — "the longer the horizon,
+      the more conservative the projection becomes," per the build spec;
+   3. the resulting total adjustment is capped to
+      `MAX_PROJECTION_PERCENT` of the baseline, regardless of horizon.
+
+      `predictedPrice` is never allowed to go non-positive; `trendAdjustment`
+      is always reported as `predictedPrice − baselinePrice` (recomputed
+      after any floor), so the two stay internally consistent even at
+      that extreme.
+7. **Uncertainty range.** `computeUncertaintyRange` derives a half-width
+   from the recent window's own price dispersion (population standard
+   deviation, `standardDeviation`), scaled by **√horizonDays** — the
+   standard random-walk convention that variance grows linearly with time
+   (so standard deviation grows with its square root). This is explainable
+   without claiming a statistical confidence level the baseline model
+   can't actually support. A configurable floor
+   (`MIN_UNCERTAINTY_RATIO`) prevents a suspiciously narrow, falsely
+   precise interval after an unusually stable run of prices.
+   `lowerBound` is always clamped at `0`, and by construction
+   `lowerBound <= predictedPrice <= upperBound` always holds.
+8. **Confidence.** A bounded `[0, 1]` heuristic — not a calibrated
+   probability — combining how much of the configured window was actually
+   available, Part 2's own `coverageRatio` for the requested window, and a
+   horizon-based decay (the same damping-curve shape as step 6, with its
+   own independent half-life, `CONFIDENCE_HORIZON_DECAY_HALF_LIFE_DAYS`).
+   `sampleCount` is the number of observations the recent window actually
+   used.
+9. **Rounding.** Every calculation above stays at full floating-point
+   precision — nothing is rounded until this last step, where
+   `predictedPrice`/`lowerBound`/`upperBound` and the metadata's numeric
+   fields are rounded once, matching the existing
+   `market-intelligence/analytics.ts` `round()` convention (never a new
+   rounding helper).
+
+### Forecast horizons
+
+Horizon bounds are entirely Part 1's: `checkDataSufficiency` (called
+inside `PriceHistoryPreparationService.prepare`) already rejects any
+`horizonDays > PRICE_FORECAST_CONFIG.MAX_HORIZON_DAYS` via
+`HORIZON_EXCEEDS_LIMIT`, and Part 3 adds no horizon logic of its own
+beyond *using* the requested horizon in the damping/uncertainty-scaling
+math above. Recommended short-term horizons (1/3/7/14/30 days) all work
+via the existing `DEFAULT_HORIZON_DAYS`/`MAX_HORIZON_DAYS` configuration —
+no new horizon enum or type was introduced.
+
+### Explainability metadata
+
+Every generated forecast's `ForecastModelMetadata.metadata` (the existing
+sanitized `Json` column) is populated with a `BaselineForecastMetadata`
+object: `algorithm` (`"WEIGHTED_MOVING_AVERAGE_TREND_V1"`),
+`historicalObservationCount`, `historyStartDate`/`historyEndDate` (ISO
+calendar-day strings — a `Json` column doesn't round-trip `Date`
+objects), `baselinePrice`, `trendSlope`, `trendDirection`,
+`trendAdjustment`, `uncertaintyMethod`
+(`"HISTORICAL_STD_DEV_SQRT_HORIZON"`), `outlierCount`, `outlierPolicy`,
+and a `configuration` snapshot of every threshold that shaped this
+specific forecast — so a forecast is fully explainable later without
+recomputing the algorithm or re-reading `MandiPrice`, and without
+trusting that `PRICE_FORECAST_CONFIG`'s defaults haven't since been
+retuned. No raw price arrays or other unnecessary data snapshots are
+stored — only these aggregated, already-rounded numbers.
+
+`modelProvider`/`modelVersion` are fixed constants
+(`BASELINE_MODEL_PROVIDER = "FARMLINK_BASELINE_ENGINE"`,
+`BASELINE_MODEL_VERSION = "WEIGHTED_MOVING_AVERAGE_TREND_V1"`) — a
+distinct, versioned algorithm identity so a future, more advanced model
+can be introduced under its own `modelVersion` without colliding with or
+silently overwriting this baseline's forecasts (they share the same
+`@@unique([cropId, scopeKey, targetDate, modelVersion])` idempotency key).
+
+### Persistence lifecycle & idempotency
+
+`PriceForecastGenerationService.generateForecast(input)`:
+
+```text
+repository.createOrGetGeneratingForecast(...)   (idempotent upsert, Part 1)
+       ↓
+row.status !== "GENERATING"?  → return the existing row as-is (no recompute)
+       ↓ (status === "GENERATING")
+preparation.prepare(...)                         (Part 2, unmodified)
+       ↓
+engine.generate(history, horizonDays)             (Part 3, pure)
+       ↓
+outcome === "INSUFFICIENT_DATA"?  → repository.markInsufficientData(...)
+       ↓ (outcome === "GENERATED")
+repository.completeForecast(...)
+```
+
+Anything unexpected thrown along the way (a database error, a thrown
+`ValidationError` from an inverted history window, etc.) is caught once,
+at the top level, and marks the pending record `FAILED` via
+`repository.failForecast` before rethrowing — mirroring
+`SellStoreOrchestrationService`'s own catch block. `INSUFFICIENT_DATA` is
+never routed through this path: it is a normal, structured domain
+outcome the engine returns, not an exception.
+
+Idempotency is enforced entirely by the *existing* Part 1 repository
+behavior (`createOrGetGeneratingForecast`'s upsert-on-conflict, keyed on
+`cropId` + `scopeKey` + `targetDate` + `modelVersion`) — Part 3 adds no
+new uniqueness logic. A repeated call for the same tuple that has already
+reached a terminal status (`COMPLETED`, `FAILED`, or `INSUFFICIENT_DATA`)
+short-circuits before `prepare()` or `generate()` ever run again.
+
+### Outlier policy (summary)
+
+See step 2 above for the full rationale. In one line: **exclude flagged
+outliers from every calculation when enough non-outlier observations
+remain (`>= MIN_OBSERVATIONS_FOR_TREND`), otherwise fall back to the full
+valid series.** No observation is ever deleted, mutated, or hidden from
+`PreparedPriceHistory` itself — this only decides which subset of it *one
+forecast run* computes from.
+
+### Configuration
+
+`PRICE_FORECAST_CONFIG` gained: `MOVING_AVERAGE_WINDOW_SIZE` (14),
+`MIN_OBSERVATIONS_FOR_TREND` (5), `TREND_FLAT_THRESHOLD_RATIO` (0.0005),
+`MAX_DAILY_TREND_ADJUSTMENT_RATIO` (0.01), `TREND_DAMPING_HALF_LIFE_DAYS`
+(7), `MAX_PROJECTION_PERCENT` (0.25), `UNCERTAINTY_MULTIPLIER` (1.5),
+`MIN_UNCERTAINTY_RATIO` (0.02), and
+`CONFIDENCE_HORIZON_DECAY_HALF_LIFE_DAYS` (14). All conservative defaults,
+not yet tuned against real data — same caveat Parts 1 and 2 document for
+their own thresholds.
+
+### Tests
+
+`price-forecasting.math.test.ts` (pure math — weighted average behavior,
+regression under trending/flat/noisy data, damping/capping/projection
+safeguards, uncertainty-range validity and horizon/volatility scaling),
+`price-forecasting.engine.test.ts` (sufficient/insufficient history
+handling, upward/downward/flat trend projection, outlier-policy branches,
+determinism, metadata correctness), and
+`price-forecast-generation.service.test.ts` (repository lifecycle
+sequencing, INSUFFICIENT_DATA vs FAILED handling, idempotent generation)
+— all against mocked repositories/services, no live database or generated
+Prisma client required, matching this suite's existing convention.
+
 ## What is explicitly NOT implemented yet
 
-- No forecasting algorithm (no moving average, regression, ARIMA, Prophet,
-  or any statistical model)
 - No LLM/AI forecasting (no Gemini, OpenAI, or any provider integration)
+- No ARIMA, Prophet, TensorFlow/PyTorch, or any general-purpose
+  statistical/ML forecasting library
 - No interpolation or fabrication of missing historical days
 - No scheduled/background forecast generation jobs
 - No API endpoints or controller/routes for this module
 - No changes to the Sell vs Store decision engine (Module 8)
 - No modification of `MandiPrice` records
 - No frontend changes
+- No automatic trading advice — a forecast is a point prediction plus an
+  explicit uncertainty range, never a guarantee
 
 ## Known limitations / follow-ups for future parts
 
 - `PriceForecastRepository` has no pagination contract for callers yet
   (same situation Module 8's `SellStoreDecisionRepository` documents) — the
   `take` cap is a defensive backstop, not a real pagination API.
-- `ForecastInput`/`ForecastOutput` assume a single-point prediction per
-  (crop, scope, target date); a future part introducing e.g. multi-day
-  forecast curves in one call would need a shape change here.
+- `ForecastOutput` assumes a single-point prediction per (crop, scope,
+  target date); a future part introducing e.g. multi-day forecast curves
+  in one call would need a shape change here.
 - `PriceHistoryPreparationService` has no caching of its own — every call
   re-queries `MandiPrice`. A future part generating forecasts on a schedule
   will likely want to cache or batch `prepare()` calls rather than call it
@@ -359,3 +578,13 @@ database.
   are the same for every crop and scope today; some crops may have
   inherently sparser reporting than others, which a future part may need
   to account for with per-crop thresholds.
+- The baseline algorithm's own thresholds (window size, damping
+  half-lives, projection/uncertainty caps) are deliberately conservative
+  defaults, not yet tuned or backtested against real historical accuracy
+  — a future part evaluating forecast quality against actuals may want to
+  retune these per-crop rather than globally.
+- No API endpoints expose these forecasts yet (by design, this part is
+  domain/service logic only) — a future part will need to add
+  controllers/routes, at which point `MIN_CONFIDENCE_THRESHOLD` (Part 1)
+  becomes relevant for deciding whether a low-confidence forecast should
+  be surfaced as actionable.
