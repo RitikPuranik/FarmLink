@@ -273,6 +273,7 @@ describe("BaselineForecastEngine — metadata correctness", () => {
     expect(meta.historyStartDate).toMatch(/^\d{4}-\d{2}-\d{2}$/);
     expect(meta.historyEndDate).toMatch(/^\d{4}-\d{2}-\d{2}$/);
     expect(meta.uncertaintyMethod).toBe("HISTORICAL_STD_DEV_SQRT_HORIZON");
+    expect(meta.coverageRatio).toBe(history.metadata.coverageRatio);
     expect(["UP", "DOWN", "FLAT"]).toContain(meta.trendDirection);
     expect(["EXCLUDED", "INCLUDED_FALLBACK"]).toContain(meta.outlierPolicy);
     // predictedPrice = baseline + trendAdjustment must hold (both rounded

@@ -83,6 +83,14 @@ export interface BaselineForecastMetadata {
   uncertaintyMethod: "HISTORICAL_STD_DEV_SQRT_HORIZON";
   outlierCount: number;
   outlierPolicy: OutlierPolicyOutcome;
+  /** Part 2's own coverage ratio for the *requested* history window
+   *  (`PreparedPriceHistory.metadata.coverageRatio`), carried through
+   *  verbatim rather than recomputed — surfaced so a consumer (Part 5's
+   *  API layer) can report data-coverage without re-reading `MandiPrice`.
+   *  Added alongside the rest of this metadata (not a new calculation —
+   *  the confidence computation already used this value internally, this
+   *  just also persists it). */
+  coverageRatio: number;
   configuration: BaselineForecastConfigurationSnapshot;
 }
 

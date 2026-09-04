@@ -72,6 +72,7 @@ const GENERATED_RESULT = {
     uncertaintyMethod: "HISTORICAL_STD_DEV_SQRT_HORIZON" as const,
     outlierCount: 0,
     outlierPolicy: "EXCLUDED" as const,
+    coverageRatio: 1,
     configuration: {
       movingAverageWindowSize: 14,
       minObservationsForTrend: 5,

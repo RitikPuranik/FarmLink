@@ -15,8 +15,11 @@ of.
 | --- | --- | --- |
 | 1 | Foundation & data model | Done |
 | 2 | Historical data preparation | Done |
-| 3 | Deterministic baseline forecasting algorithm (this document) | Done |
-| 4+ | Scheduled generation, API endpoints, Sell vs Store integration | Not implemented |
+| 3 | Deterministic baseline forecasting algorithm | Done |
+| 4 | Application orchestration (crop/mandi resolution, idempotent generation, retrieval) | Done |
+| 5 | REST API (routes, RBAC, validation, DTOs, Swagger) | Done |
+| 6 | Observability, caching, testing, production hardening (this document) | Done |
+| 7+ | Scheduled/background generation, Sell vs Store integration | Not implemented |
 
 ## MandiPrice remains the authoritative historical source
 
@@ -535,6 +538,13 @@ forecast run* computes from.
 not yet tuned against real data — same caveat Parts 1 and 2 document for
 their own thresholds.
 
+Parts 4-6 later made two small, purely additive changes here (no existing
+behavior changed): `BaselineForecastMetadata` gained a `coverageRatio`
+field (Part 2's own value, already computed for confidence, now also
+persisted so the API layer can report data coverage without recomputing
+anything), and `PRICE_FORECAST_CONFIG` gained `HIGH_CONFIDENCE_THRESHOLD`
+(0.7) for the API's confidence-level display banding — see Part 5.
+
 ### Tests
 
 `price-forecasting.math.test.ts` (pure math — weighted average behavior,
@@ -548,43 +558,346 @@ sequencing, INSUFFICIENT_DATA vs FAILED handling, idempotent generation)
 — all against mocked repositories/services, no live database or generated
 Prisma client required, matching this suite's existing convention.
 
-## What is explicitly NOT implemented yet
+## Part 4 — Application orchestration layer
 
-- No LLM/AI forecasting (no Gemini, OpenAI, or any provider integration)
+`price-forecasting.service.ts`'s `PriceForecastingService` is the
+application-boundary layer connecting everything Parts 1-3 already built.
+It deliberately does **not** re-implement history preparation, sufficiency
+checking, the forecasting algorithm, or the GENERATING→COMPLETED/FAILED/
+INSUFFICIENT_DATA persistence lifecycle — all of that already existed
+(`PriceHistoryPreparationService`, `BaselineForecastEngine`,
+`PriceForecastGenerationService`) before this part started. What this part
+adds is everything that only makes sense at the application boundary:
+
+- **Crop/mandi existence validation.** `requireCrop`/`resolveScope` look up
+  the crop and (for a MANDI scope) the mandi via the *same*
+  `MarketIntelligenceRepository` instance `app.ts` already shares with
+  Module 8's `DecisionInputResolverService` — not a new query path.
+  Missing either throws `MarketDomainError` with `CROP_NOT_FOUND` /
+  `MANDI_NOT_FOUND` (404), reusing the exact error codes already defined in
+  `common/errors.ts` and already used by Market Intelligence/Buyer
+  Matching — no new error codes were added for this.
+- **Public ↔ internal mandi ID translation.** A client-supplied `mandiId`
+  is always `Mandi.publicId` (the DTO layer never exposes `Mandi.id`); this
+  service resolves it to the internal id `ForecastScope`/`MandiPrice`
+  actually key off, and translates back on the way out. List results batch
+  this translation in one extra query (`resolveMandisBatch`) rather than
+  one lookup per row, avoiding N+1.
+- **Target date computation.** The API only asks for a `horizonDays`, not
+  an explicit target date — this service computes
+  `targetDate = today (UTC) + horizonDays`, which is what
+  `PriceForecastGenerationService`/the DB's idempotency key
+  (`cropId, scopeKey, targetDate, modelVersion`) actually operate on.
+- **"Reuse an existing forecast" fast path.** Before calling
+  `PriceForecastGenerationService.generateForecast()`, this service checks
+  `PriceForecastRepository.findByDateRange()` for the exact same
+  `(cropId, scope, targetDate)` already carrying a terminal (non-GENERATING)
+  status under the current model version, and returns it directly if
+  found. This is deliberately **not** a new source of truth for
+  idempotency — the DB-level unique constraint / upsert
+  (`createOrGetGeneratingForecast`, Part 1) already guarantees no duplicate
+  row can ever be created for that tuple regardless of this check. The
+  check exists so "reused" is observably distinct from "freshly generated"
+  for analytics, and so a repeated request for an already-completed
+  forecast doesn't even call `PriceHistoryPreparationService.prepare()`
+  again.
+- **Algorithm output validation.** `assertGeneratedForecastIsSane()`
+  (`price-forecasting.dto.ts`) is a defense-in-depth check run against any
+  freshly-COMPLETED forecast before it's returned: finite/non-negative
+  `predictedPrice`, a well-ordered `[lowerBound, upperBound]` range, a
+  confidence score within `[0, 1]`, and a persisted `horizonDays` matching
+  what was actually requested. Part 3's pure math already makes every one
+  of these true by construction (rounding, `Math.max(..., 0)` floors,
+  clamped confidence) — this exists to turn a genuine future regression in
+  that math into a loud, Sentry-captured failure instead of a silently
+  bad prediction reaching a client.
+- **DTO mapping, caching, analytics, and audit** — covered in their own
+  sections below.
+
+## Part 5 — REST API
+
+### Endpoints
+
+All under `/api/price-forecasting`, all requiring authentication plus one
+of `FARMER` / `FPO_ADMIN` / `ADMIN` (`requireAnyRole`, the same middleware
+Modules 6/8 use). There is no separate generate-vs-read permission split —
+forecasts are crop/market-level analytical data with no per-resource
+owner to layer an ownership check on top of, the same reasoning Market
+Intelligence's own RBAC already follows.
+
+| Method | Path | Purpose |
+| --- | --- | --- |
+| POST | `/generate` | Generate a forecast, or transparently reuse an equivalent one that already exists. |
+| GET | `/:forecastPublicId` | Retrieve a persisted forecast by its public ID. Never recomputes. |
+| GET | `/crops/:cropId` | List forecasts for a crop (bounded, most-recent-first; `scopeType`/`mandiId`/`startDate`/`endDate`/`limit` filters). |
+| GET | `/crops/:cropId/latest` | Retrieve the latest valid (`COMPLETED`, unexpired) forecast for a crop + scope. Defaults to `CROP_WIDE` when no scope query params are given. |
+
+Full request/response schemas are registered in Swagger under the
+**Price Forecasting** tag (see `price-forecasting.routes.ts`'s `@openapi`
+blocks) — this section covers the design decisions, not a schema
+duplicate.
+
+### Scope validation
+
+`scope` (in the POST body) and the `scopeType`/`mandiId`/`state`/`district`
+query parameters (on the two GET-with-scope endpoints) are validated as a
+**strict Zod discriminated union** on `type` — MANDI requires `mandiId`
+and accepts nothing else; REGIONAL requires `state` (optionally
+`district`) and accepts nothing else; CROP_WIDE accepts no other field at
+all. An invalid combination (e.g. a `mandiId` alongside `CROP_WIDE`, a
+REGIONAL scope missing `state`) is rejected as a `400 VALIDATION_ERROR`
+by the schema itself, before any handler code runs — this is why no
+`INVALID_FORECAST_SCOPE` domain error code exists; the existing
+`ValidationError`/Zod pipeline already covers it.
+
+### Horizon validation
+
+`horizonDays` is validated against
+`PRICE_FORECAST_CONFIG.MAX_HORIZON_DAYS` directly in the Zod schema (not a
+second, hand-maintained copy of that number) — a horizon over the limit is
+rejected as a `400` before any history is read. This is in addition to
+(not a replacement for) Part 1's own `HORIZON_EXCEEDS_LIMIT` sufficiency
+check inside `checkDataSufficiency`, which remains the defense-in-depth
+backstop for any non-HTTP caller of `PriceForecastGenerationService`
+directly.
+
+### Errors
+
+No new error codes were introduced beyond what already existed:
+
+| Situation | Error | Why no new code |
+| --- | --- | --- |
+| Crop doesn't exist | `MarketDomainError("CROP_NOT_FOUND", 404)` | Already defined and used by Market Intelligence/Buyer Matching. |
+| Mandi doesn't exist | `MarketDomainError("MANDI_NOT_FOUND", 404)` | Same. |
+| Forecast public ID doesn't exist | `NotFoundError` (`NOT_FOUND`, 404) | Same generic 404 every other module uses for "this specific resource doesn't exist" (e.g. Sell vs Store's `NotFoundError("Decision not found.")`). |
+| Invalid scope/horizon/body shape | `ValidationError` (400) via Zod | Already the standard validation pipeline. |
+| Unexpected failure (DB error, etc.) | Generic `UNEXPECTED_ERROR` (500) via the centralized error handler | Already captures to Sentry and returns a safe message; no bespoke `FORECAST_GENERATION_FAILED` code was needed. |
+
+`INSUFFICIENT_DATA` is **never** an error — it's a normal
+`status: "INSUFFICIENT_DATA"` value in a `200` response body, exactly per
+the build spec's "should not automatically become HTTP 500."
+
+### Response shape
+
+Every response uses the project's existing envelope
+(`{ success, data, message }` via `sendSuccess`/`sendError`, never a new
+envelope shape). `data` is a `ForecastResponseDTO`
+(`price-forecasting.dto.ts`) — never a raw Prisma row, never a raw
+`Decimal`. One deliberate deviation from the build spec's own example
+response: the example's `predictions: [...]` (plural, an array) is *not*
+what this DTO returns. This algorithm produces exactly one point
+prediction (with a bound range) per forecast, not a multi-day curve —
+returning a single `prediction: { targetDate, predictedPrice, lowerBound,
+upperBound } | null` object is the honest shape of what was actually
+computed, rather than wrapping a single value in an array to match an
+example literally. `prediction`/`confidence` are `null` whenever
+`status !== "COMPLETED"` — never a fabricated value. `insufficiencyReasons`
+is populated (non-empty) only when `status === "INSUFFICIENT_DATA"`.
+`limitations` (a fixed, centralized list — not fabricated per request) and
+`disclaimer` are present on every response regardless of status, per the
+build spec's explicit "include a concise disclaimer" requirement.
+
+`metadata.coverageRatio` and `metadata.historyFreshness` power the
+"source data freshness"/"data coverage" fields the build spec asked for —
+`coverageRatio` is Part 2's own value, threaded through Part 3's
+persisted metadata (a small, additive change to `BaselineForecastMetadata`
+— see Part 3 section above); freshness reuses Module 6's existing
+`freshness()` classifier against the history's last observed date, rather
+than inventing a second freshness scale.
+
+`confidence.level` (`LOW`/`MEDIUM`/`HIGH`) is a presentation-layer banding
+of Part 3's raw `0-1` score (`classifyConfidenceLevel`,
+`price-forecasting.dto.ts`), using `MIN_CONFIDENCE_THRESHOLD` (already
+defined in Part 1) as the LOW/MEDIUM boundary and a new
+`HIGH_CONFIDENCE_THRESHOLD` (0.7) for MEDIUM/HIGH — never a gate on
+whether a forecast is generated or persisted, purely a display
+convenience.
+
+## Part 6 — Observability, caching, and production hardening
+
+### Redis caching
+
+`price-forecasting.cache.ts` mirrors `market-intelligence/market-cache.ts`'s
+own design exactly (version-keyed invalidation, SHA-256 digest cache keys,
+short TTL, fully optional) rather than introducing a second caching
+architecture:
+
+- Only the two read paths that make sense to cache are cached:
+  `findLatestForecast` and `listForecasts`. `generateForecast` is **never**
+  cached — idempotency there is entirely the database's own upsert, and
+  caching a generation result could serve a stale answer to "was this
+  reused or freshly generated."
+- Cache keys are built from every dimension the build spec asked for
+  (crop, scope, mandi/region, horizon/filters) via a SHA-256 digest of the
+  exact parameters used.
+- A single global version key (`price-forecasting:version`) is
+  incremented after every successful generation (`COMPLETED` or
+  `INSUFFICIENT_DATA` — both change what "latest"/"list" should return),
+  which invalidates every cached read at once. This is the same
+  simplicity/precision trade-off `market-cache.ts` already makes for the
+  same reason; a 120-second TTL keeps the blast radius of ever missing an
+  invalidation small.
+- If `getRedis()` returns `null` (Redis not configured) or any Redis call
+  throws, every cache function degrades to "no cache" (a miss on read, a
+  silent no-op on write) — a forecast read never fails because Redis is
+  unavailable.
+
+### PostHog analytics
+
+New allow-listed events (`config/posthog.ts`'s `ALLOWED_EVENTS`, same
+allow-list every other module's events go through —
+`trackEvent()` silently no-ops on anything not listed):
+`forecast_requested`, `forecast_generated`, `forecast_reused`,
+`forecast_insufficient_data`, `forecast_failed`, `forecast_viewed`.
+Generation-outcome events fire from `PriceForecastingService` (which
+alone knows whether a result was reused vs. freshly computed);
+`forecast_viewed` fires from the controller for the three read endpoints,
+mirroring `sell-vs-store.controller.ts`'s own split between
+service-level generation events and controller-level view events. No
+event ever carries a predicted price, confidence score, or other model
+output — only crop/scope/horizon identifiers and coarse outcome, the same
+"no sensitive payloads" rule the rest of this allow-list already follows.
+
+### Sentry
+
+No new Sentry integration code was needed — the existing centralized
+`errorHandler` (`middleware/errorHandler.ts`) already calls
+`captureException` for any error that isn't a recognized `AppError`
+subclass, with the request path/method as context. Every unexpected
+failure in this module's generate/prepare/persist path already flows
+through that same handler; `INSUFFICIENT_DATA` never reaches it at all
+(it's a normal `200` response, not a thrown error), so it can never be
+mistaken for a crash.
+
+### Audit logging
+
+One new `AuditAction`: `PRICE_FORECAST_GENERATED`
+(`modules/audit/audit.service.ts`), recorded only when a **freshly
+generated** forecast reaches `COMPLETED` — mirroring the exact
+"one entry per persisted generation" convention
+`MARKET_RECOMMENDATION_GENERATED`/`SELL_STORE_DECISION_GENERATED` already
+follow. Reused forecasts, `INSUFFICIENT_DATA` outcomes, and every read
+endpoint are **not** audited, per the build spec's explicit "do not audit
+every forecast read."
+
+### Swagger
+
+All four endpoints are documented under a new **Price Forecasting** tag
+(`@openapi` JSDoc blocks directly in `price-forecasting.routes.ts`,
+registered the same way every other module's routes already are — no new
+Swagger wiring). Request/response schemas, the MANDI/REGIONAL/CROP_WIDE
+scope variants, validation rules, and the full set of expected HTTP
+responses (200/400/401/403/404/422/500) are documented per endpoint,
+including that `INSUFFICIENT_DATA` is a normal `200`, not a `4xx`/`5xx`.
+
+### Environment configuration
+
+**No new environment variables were added.** The cache TTL is a plain
+constant in `price-forecasting.cache.ts` (matching
+`market-cache.ts`'s own hardcoded TTL, not a new env var); the model
+version, maximum horizon, and minimum-observations thresholds were all
+already centralized in `PRICE_FORECAST_CONFIG` (Part 1/3) — Part 4-6 read
+them, never duplicated them into a second configuration surface.
+
+### Tests added
+
+- `price-forecasting.dto.test.ts` — confidence-level banding, DTO mapping
+  (prediction/confidence nulled for non-COMPLETED, disclaimer/limitations
+  always present, mandi public-id-only exposure), and
+  `assertGeneratedForecastIsSane`'s every failure mode.
+- `price-forecasting.cache.test.ts` — hit/miss/invalidation with a fake
+  Redis client, plus graceful degradation when `getRedis()` returns `null`
+  and when Redis calls reject.
+- `price-forecasting.service.test.ts` — crop/mandi validation and public↔
+  internal ID resolution, all three scope types, `INSUFFICIENT_DATA`
+  handled without throwing, `FAILED` rethrown with `forecast_failed`
+  tracked, output-sanity rejection, audit/cache/analytics firing exactly
+  once per generation, existing-forecast reuse (including a `GENERATING`
+  row correctly *not* being treated as reusable, and a different model
+  version correctly being ignored as a match), and every read method
+  never touching the generation service.
+- `price-forecasting.routes.test.ts` (integration, `supertest`) —
+  authentication required; FARMER/FPO_ADMIN/ADMIN allowed, BUYER
+  rejected (403); invalid scope combinations, missing required scope
+  fields, and over-limit horizon all rejected as 400; unknown crop/mandi
+  as 404 domain errors (not 500); a genuinely unexpected failure still
+  surfacing as 500; `INSUFFICIENT_DATA` returned as a normal 200; and the
+  response envelope shape across all four endpoints.
+
+All new tests run against mocked services/repositories — no live database
+or generated Prisma client required, matching every existing test in this
+module.
+
+### Regression verification
+
+Module 6 (Market Intelligence), Module 7 Parts 1-3, and Module 8 (Sell vs
+Store) test suites were re-run after these changes and are unaffected —
+see Verification below for exact numbers.
+
+## What is explicitly NOT implemented
+
+- No LLM/AI forecasting (no Gemini, OpenAI, Claude/ChatGPT APIs, or any
+  external black-box forecasting provider)
 - No ARIMA, Prophet, TensorFlow/PyTorch, or any general-purpose
   statistical/ML forecasting library
-- No interpolation or fabrication of missing historical days
-- No scheduled/background forecast generation jobs
-- No API endpoints or controller/routes for this module
-- No changes to the Sell vs Store decision engine (Module 8)
-- No modification of `MandiPrice` records
+- No interpolation or fabrication of missing historical days, or of a
+  forecast's predicted value when data is insufficient
+- No scheduled/background forecast generation jobs (every forecast is
+  generated on-demand via `POST /generate`)
+- No changes to the Sell vs Store decision engine (Module 8) — it does
+  not yet consume Module 7 forecasts, and none of its own files were
+  modified
+- No modification of `MandiPrice` records, and no duplication of Module 6's
+  own analytics beyond the crop/mandi lookups this module explicitly
+  reuses
 - No frontend changes
-- No automatic trading advice — a forecast is a point prediction plus an
-  explicit uncertainty range, never a guarantee
+- No new environment variables
+- No new Prisma migrations — `AuditAction`'s new value needed none
+  (`AuditLog.action` is a plain `String` column), and every other Part
+  4-6 need was already satisfied by Part 1's existing `PriceForecast`
+  model
+- No automatic trading advice, autonomous selling recommendations,
+  notifications, or transactions triggered by a forecast
+- No new domain error codes — every situation Part 5 needed was already
+  covered by an existing error code or the standard Zod validation
+  pipeline (see the Errors table above)
 
 ## Known limitations / follow-ups for future parts
 
 - `PriceForecastRepository` has no pagination contract for callers yet
   (same situation Module 8's `SellStoreDecisionRepository` documents) — the
-  `take` cap is a defensive backstop, not a real pagination API.
+  `take` cap is a defensive backstop, not a real pagination API. The list
+  endpoint's `scopeType`/date-range filters are applied to that same
+  bounded, most-recent-first result set (except the `mandiId` filter,
+  which uses a dedicated indexed query) — a crop with many forecasts
+  across many different mandis could have older matching rows fall
+  outside the bound.
 - `ForecastOutput` assumes a single-point prediction per (crop, scope,
   target date); a future part introducing e.g. multi-day forecast curves
-  in one call would need a shape change here.
-- `PriceHistoryPreparationService` has no caching of its own — every call
-  re-queries `MandiPrice`. A future part generating forecasts on a schedule
-  will likely want to cache or batch `prepare()` calls rather than call it
-  once per crop/scope pair on every run.
+  in one call would need a shape change here, and the API's `prediction`
+  field (currently a single object, not the array the build spec's
+  example sketched) would need to change accordingly.
+- `PriceHistoryPreparationService` has no caching of its own — every
+  generation call re-queries `MandiPrice`. Part 6's caching only covers
+  *read* endpoints; a future part generating forecasts on a schedule will
+  still want to cache/batch `prepare()` calls itself.
 - Gap/coverage thresholds (`MIN_COVERAGE_RATIO`, `MAX_ACCEPTABLE_GAP_DAYS`)
-  are the same for every crop and scope today; some crops may have
-  inherently sparser reporting than others, which a future part may need
-  to account for with per-crop thresholds.
-- The baseline algorithm's own thresholds (window size, damping
-  half-lives, projection/uncertainty caps) are deliberately conservative
-  defaults, not yet tuned or backtested against real historical accuracy
-  — a future part evaluating forecast quality against actuals may want to
-  retune these per-crop rather than globally.
-- No API endpoints expose these forecasts yet (by design, this part is
-  domain/service logic only) — a future part will need to add
-  controllers/routes, at which point `MIN_CONFIDENCE_THRESHOLD` (Part 1)
-  becomes relevant for deciding whether a low-confidence forecast should
-  be surfaced as actionable.
+  and the baseline algorithm's own thresholds (window size, damping
+  half-lives, projection/uncertainty caps, and now also
+  `HIGH_CONFIDENCE_THRESHOLD`) are the same for every crop and scope
+  today and are deliberately conservative defaults, not yet tuned or
+  backtested against real historical accuracy.
+- The forecast-reuse cache's single global version key means *any*
+  crop's successful generation invalidates *every* cached read across
+  every crop — simple and correct, at the cost of a cache that resets
+  more often than strictly necessary under heavy concurrent generation
+  across many crops. A future part could scope invalidation per crop if
+  this becomes a measured problem.
+- `MIN_CONFIDENCE_THRESHOLD` (Part 1) still has no enforced consumer — the
+  API surfaces `confidence.level` for a client to act on, but nothing
+  server-side currently refuses to return a low-confidence forecast. This
+  remains intentional (a forecast is always returned honestly, confidence
+  and all) rather than an oversight.
+- A future part integrating with Module 8 (Sell vs Store) would consume
+  `findLatestForecast`/`GET /crops/:cropId/latest` rather than duplicating
+  forecast-generation logic — Module 8 does not do this yet.

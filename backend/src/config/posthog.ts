@@ -72,6 +72,17 @@ const ALLOWED_EVENTS = new Set([
   "advisory_requested",
   "advisory_success",
   "advisory_failed",
+  // Module 7 — Price Forecasting. Never includes predicted prices,
+  // confidence scores, or any model output — only that a
+  // request/generation/view happened and its coarse outcome, matching the
+  // "no precise coordinates, no private data" rule the rest of this
+  // allow-list already follows.
+  "forecast_requested",
+  "forecast_generated",
+  "forecast_reused",
+  "forecast_insufficient_data",
+  "forecast_failed",
+  "forecast_viewed",
 ]);
 
 // Defense in depth: even if a caller accidentally passes a sensitive key in

@@ -68,6 +68,13 @@ import { MarketIntelligenceService } from "./modules/market-intelligence/market-
 import { createMarketIntelligenceRouter } from "./modules/market-intelligence/market-intelligence.routes";
 import { BuyerMatchingService } from "./modules/buyer-matching/buyer-matching.service";
 import { createBuyerMatchingRouter } from "./modules/buyer-matching/buyer-matching.routes";
+import { PriceHistoryRepository } from "./modules/price-forecasting/price-history.repository";
+import { PriceHistoryPreparationService } from "./modules/price-forecasting/price-history-preparation.service";
+import { BaselineForecastEngine } from "./modules/price-forecasting/price-forecasting.engine";
+import { PriceForecastRepository } from "./modules/price-forecasting/price-forecasting.repository";
+import { PriceForecastGenerationService } from "./modules/price-forecasting/price-forecast-generation.service";
+import { PriceForecastingService } from "./modules/price-forecasting/price-forecasting.service";
+import { createPriceForecastingRouter } from "./modules/price-forecasting/price-forecasting.routes";
 
 export interface AppDependencies {
   authRepository: AuthRepository;
@@ -241,6 +248,28 @@ export function createApp(deps: AppDependencies): Express {
     deps.auditService,
   );
 
+  // Module 7 — Price Forecasting (deterministic baseline; see
+  // modules/price-forecasting for Parts 1-6). Depends only on Module 6's
+  // shared marketIntelligenceRepository instance above for crop/mandi
+  // lookups — never touches MandiPrice directly outside its own
+  // PriceHistoryRepository, and never modifies Module 6's tables.
+  const priceHistoryRepository = new PriceHistoryRepository(deps.prisma);
+  const priceHistoryPreparationService = new PriceHistoryPreparationService(priceHistoryRepository);
+  const baselineForecastEngine = new BaselineForecastEngine();
+  const priceForecastRepository = new PriceForecastRepository(deps.prisma);
+  const priceForecastGenerationService = new PriceForecastGenerationService(
+    priceHistoryPreparationService,
+    baselineForecastEngine,
+    priceForecastRepository,
+  );
+  const priceForecastingService = new PriceForecastingService(
+    priceForecastGenerationService,
+    priceForecastRepository,
+    marketIntelligenceRepository,
+    deps.prisma,
+    deps.auditService,
+  );
+
   app.get("/health", (_req, res) => res.status(200).json({ success: true, data: { status: "ok" } }));
 
   app.use("/api/docs", swaggerUi.serve, swaggerUi.setup(swaggerSpec));
@@ -297,6 +326,12 @@ export function createApp(deps: AppDependencies): Express {
     createMarketIntelligenceRouter(marketIntelligenceService, deps.authRepository, deps.auditService),
   );
   app.use("/api", createBuyerMatchingRouter(buyerMatchingService, deps.authRepository, deps.auditService));
+
+  // Module 7 — Price Forecasting.
+  app.use(
+    "/api/price-forecasting",
+    createPriceForecastingRouter(priceForecastingService, deps.authRepository, deps.auditService),
+  );
 
   // Module 8 — Sell vs Store Decision Engine
   const sellStoreDecisionRepository = new SellStoreDecisionRepository(deps.prisma);

@@ -37,8 +37,16 @@ export const PRICE_FORECAST_CONFIG = {
   /** Minimum confidence score (0-1) a forecast must carry to be treated as
    *  usable by any future downstream consumer (e.g. Sell vs Store). Below
    *  this, a forecast should still be persisted (for audit purposes) but
-   *  never surfaced as an actionable prediction. */
+   *  never surfaced as an actionable prediction. Also the LOW/MEDIUM
+   *  boundary the API layer's confidence-level classification uses (Part
+   *  5) — see HIGH_CONFIDENCE_THRESHOLD for the MEDIUM/HIGH boundary. */
   MIN_CONFIDENCE_THRESHOLD: 0.3,
+
+  /** Confidence score (0-1) at or above which the API layer classifies a
+   *  forecast's confidence as HIGH rather than MEDIUM (Part 5) — purely a
+   *  presentation-layer banding on top of the score Part 3 already
+   *  computes, never a gate on generation itself. */
+  HIGH_CONFIDENCE_THRESHOLD: 0.7,
 
   // ── Historical data preparation (Module 7 Part 2) ─────────────────────
   /** Default lookback window, in calendar days (inclusive of the end

@@ -11,8 +11,11 @@ import {
 // Same defensive-cap rationale as SellStoreDecisionRepository's
 // MAX_HISTORY_RESULTS (see that file's comment): this module has no
 // pagination contract yet, so list methods use a generous fixed bound
-// rather than an unbounded query.
-const MAX_LIST_RESULTS = 200;
+// rather than an unbounded query. Exported so Part 5's API layer can
+// reference the exact same ceiling in its query-schema validation
+// (`price-forecasting.schemas.ts`) instead of hardcoding a second number
+// that could silently drift from this one.
+export const MAX_LIST_RESULTS = 200;
 
 function toPersistedForecast(row: PriceForecast): PersistedForecast {
   const hasOutput = row.status === "COMPLETED";

@@ -18,6 +18,8 @@ const options: swaggerJsdoc.Options = {
         "**Module 6**: Market Intelligence & Price Discovery (freshness, local context).\n" +
         "**Module 7**: Buyer Management & Matching (demands, deterministic lot matching, offers, atomic reservation).\n" +
         "**Module 8**: Sell vs Store Decision Engine (market/quality/storage context evaluation).\n\n" +
+        "**Price Forecasting**: Deterministic baseline market price forecasting (weighted moving average + damped trend). " +
+        "Never an LLM/ML model; forecasts are analytical estimates, not guarantees.\n\n" +
         "Logistics, shipment, payment, and grievance are not yet part of this API.",
     },
     servers: [{ url: env.BACKEND_URL, description: "Current environment" }],

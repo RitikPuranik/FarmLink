@@ -145,6 +145,7 @@ export class BaselineForecastEngine {
       uncertaintyMethod: "HISTORICAL_STD_DEV_SQRT_HORIZON",
       outlierCount: history.metadata.outlierCount,
       outlierPolicy: excludeOutliers ? "EXCLUDED" : "INCLUDED_FALLBACK",
+      coverageRatio: history.metadata.coverageRatio,
       configuration: {
         movingAverageWindowSize: cfg.MOVING_AVERAGE_WINDOW_SIZE,
         minObservationsForTrend: cfg.MIN_OBSERVATIONS_FOR_TREND,
