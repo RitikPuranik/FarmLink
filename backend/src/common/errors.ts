@@ -50,6 +50,17 @@ export type ErrorCode =
   | "INSUFFICIENT_STORAGE_CAPACITY"
   | "STORAGE_COMPATIBILITY_UNKNOWN"
   | "CROP_NOT_SUPPORTED_BY_WAREHOUSE"
+  // Module 9 Part 3 — Storage Conditions, Crop Suitability & Storage
+  // Constraints. Only used by the admin/operator configuration endpoints
+  // (invalid input); the suitability/eligibility read endpoints never
+  // error out for missing configuration — that is an honest UNKNOWN
+  // result, not a 4xx (see storage-suitability.engine.ts).
+  | "INVALID_TEMPERATURE_RANGE"
+  | "INVALID_HUMIDITY_RANGE"
+  | "INVALID_STORAGE_CONDITION"
+  | "INVALID_STORAGE_REQUIREMENT"
+  // Module 9 Part 4 — Warehouse Suitability & Risk Analysis.
+  | "INVALID_DURATION"
   | "UNEXPECTED_ERROR";
 
 export class AppError extends Error {
@@ -153,6 +164,11 @@ export class WarehouseDomainError extends AppError {
       | "INSUFFICIENT_STORAGE_CAPACITY"
       | "STORAGE_COMPATIBILITY_UNKNOWN"
       | "CROP_NOT_SUPPORTED_BY_WAREHOUSE"
+      | "INVALID_TEMPERATURE_RANGE"
+      | "INVALID_HUMIDITY_RANGE"
+      | "INVALID_STORAGE_CONDITION"
+      | "INVALID_STORAGE_REQUIREMENT"
+      | "INVALID_DURATION"
     >,
     statusCode = 422,
   ) {

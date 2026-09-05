@@ -547,6 +547,12 @@ model Crop {
   warehouseCapabilities WarehouseCropCapability[]
   storageRates          StorageRate[]
 
+  // Module 9 Part 3 — at most one explicitly configured storage
+  // requirement set per crop (see CropStorageRequirement's own comment
+  // for why this is never auto-created). Optional 1:1, mirroring
+  // FarmerProfile's own optional-relation convention.
+  storageRequirement CropStorageRequirement?
+
   @@map("crops")
 }
 
@@ -1869,6 +1875,25 @@ model WarehouseStorageUnit {
   minHumidity        Decimal? @db.Decimal(5, 2)
   maxHumidity        Decimal? @db.Decimal(5, 2)
 
+  // Module 9 Part 3 — declared/configured storage capabilities, not
+  // real-time IoT telemetry (this part's explicit scope limit: "these are
+  // declared/configured storage capabilities, not real-time IoT
+  // telemetry"). Nullable rather than defaulted to false: a warehouse
+  // operator who has never been asked about pest control has *unknown*
+  // pest control, which is not the same fact as "confirmed absent" — the
+  // suitability engine (storage-suitability.engine.ts) treats null as
+  // UNKNOWN, never as false. coldStorageAvailable is deliberately its own
+  // column rather than only inferred from storageType === COLD_STORAGE:
+  // a unit can be an AMBIENT-typed chamber that additionally has cold
+  // storage capability configured (or vice versa, a COLD_STORAGE-typed
+  // unit temporarily without working refrigeration) — collapsing the two
+  // would silently discard whichever fact wasn't the "primary" type.
+  ventilationAvailable          Boolean?
+  coldStorageAvailable          Boolean?
+  controlledAtmosphereAvailable Boolean?
+  pestControlAvailable          Boolean?
+  moistureControlAvailable      Boolean?
+
   isActive Boolean @default(true)
 
   createdAt DateTime @default(now())
@@ -2012,4 +2037,76 @@ model StorageRate {
   @@index([cropId])
   @@index([effectiveFrom, effectiveUntil])
   @@map("storage_rates")
+}
+
+// ---------------------------------------------------------------------------
+// Module 9 Part 3 — Storage Conditions, Crop Suitability & Storage
+// Constraints.
+//
+// This part deliberately does NOT introduce a new "storage conditions"
+// model for the warehouse side — WarehouseStorageUnit (Part 1) already
+// persists exactly that (temperature/humidity range + the five boolean
+// capability columns added just above). What was missing, and what this
+// part adds, is the *crop* side: explicit, never-auto-generated storage
+// requirements to compare those warehouse facts against. See
+// storage-suitability.engine.ts for the deterministic, non-AI comparison
+// this feeds.
+// ---------------------------------------------------------------------------
+
+// Explicit, admin/operator-configured crop storage requirements — the
+// deliberate crop-side counterpart to WarehouseStorageUnit's conditions.
+// Never auto-created for every crop (this part's explicit "do not
+// automatically create requirements for every crop" instruction): a crop
+// with no row here means the suitability engine honestly reports
+// UNKNOWN/INSUFFICIENT_DATA rather than falling back to generic
+// agricultural assumptions. One row per crop (cropId unique) — this part
+// does not need requirement versioning/history, mirroring
+// QualityStandard's own "plain config row" simplicity rather than
+// QualityAssessment's append-only-history pattern.
+model CropStorageRequirement {
+  id     String @id @default(uuid())
+  cropId String @unique
+
+  preferredTemperatureMin Decimal? @db.Decimal(5, 2)
+  preferredTemperatureMax Decimal? @db.Decimal(5, 2)
+  preferredHumidityMin    Decimal? @db.Decimal(5, 2)
+  preferredHumidityMax    Decimal? @db.Decimal(5, 2)
+
+  // Same "null = unknown, never assumed false" discipline as
+  // WarehouseStorageUnit's new boolean columns — a null here means this
+  // requirement was never explicitly configured, which the engine treats
+  // as OMITTED/NOT_REQUIRED, never as "false = not needed" by coincidence
+  // of a default.
+  requiresVentilation          Boolean?
+  requiresColdStorage          Boolean?
+  requiresControlledAtmosphere Boolean?
+  requiresPestControl          Boolean?
+  requiresMoistureControl      Boolean?
+
+  // Empty array = no storage-type restriction explicitly configured
+  // (OMITTED factor), never "compatible with nothing". Reuses the
+  // existing StorageType enum rather than inventing a second one (this
+  // part's explicit "do not blindly add new storage types" instruction).
+  compatibleStorageTypes StorageType[] @default([])
+
+  // Only ever compared/displayed, never used to predict spoilage (this
+  // part's explicit non-goal) — a configured guidance figure, mirroring
+  // WarehouseCropCapability.maxStorageDurationDays's own "configured, not
+  // computed" discipline.
+  maximumRecommendedStorageDays Int?
+
+  notes String?
+
+  isActive Boolean @default(true)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  // Restrict: a crop reference row must never disappear out from under a
+  // configured requirement, mirroring every other Crop relation's Restrict
+  // convention in this schema.
+  crop Crop @relation(fields: [cropId], references: [id], onDelete: Restrict)
+
+  @@index([cropId])
+  @@map("crop_storage_requirements")
 }

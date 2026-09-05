@@ -41,6 +41,14 @@ export interface StorageConditions {
   humidityControlled: boolean;
   minHumidity: number | null;
   maxHumidity: number | null;
+  // Module 9 Part 3 — declared/configured capability flags, `null` means
+  // never configured (unknown), never coerced to false. See
+  // WarehouseStorageUnit's own schema comment.
+  ventilationAvailable: boolean | null;
+  coldStorageAvailable: boolean | null;
+  controlledAtmosphereAvailable: boolean | null;
+  pestControlAvailable: boolean | null;
+  moistureControlAvailable: boolean | null;
 }
 
 export type WarehouseWithRelations = Warehouse;
@@ -193,6 +201,11 @@ export function toWarehouseStorageUnitDTO(row: WarehouseStorageUnitWithRelations
       humidityControlled: row.humidityControlled,
       minHumidity: row.minHumidity === null ? null : Number(row.minHumidity),
       maxHumidity: row.maxHumidity === null ? null : Number(row.maxHumidity),
+      ventilationAvailable: row.ventilationAvailable,
+      coldStorageAvailable: row.coldStorageAvailable,
+      controlledAtmosphereAvailable: row.controlledAtmosphereAvailable,
+      pestControlAvailable: row.pestControlAvailable,
+      moistureControlAvailable: row.moistureControlAvailable,
     },
     isActive: row.isActive,
     createdAt: row.createdAt.toISOString(),

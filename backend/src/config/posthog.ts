@@ -77,6 +77,18 @@ const ALLOWED_EVENTS = new Set([
   // longitude defensively even if a caller passed them by mistake).
   "warehouse_search",
   "warehouse_availability_viewed",
+  // Module 9 Part 3 — Storage Conditions, Crop Suitability & Storage
+  // Constraints. Never includes precise coordinates or sensitive farm/lot
+  // data — only the resulting status, mirroring
+  // warehouse_availability_viewed above.
+  "warehouse_suitability_checked",
+  "warehouse_storage_eligibility_checked",
+  // Module 9 Part 4 — Warehouse Suitability & Risk Analysis. Carries only
+  // the resulting status/blocking flag, never coordinates or lot data.
+  "warehouse_suitability_analyzed",
+  // Module 9 Part 5 — Warehouse Recommendation & Ranking Engine.
+  "warehouse_recommendation_requested",
+  "warehouse_recommendation_generated",
 ]);
 
 // Defense in depth: even if a caller accidentally passes a sensitive key in

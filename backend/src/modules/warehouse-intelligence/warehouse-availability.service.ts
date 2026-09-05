@@ -11,6 +11,7 @@ import {
   calculateUtilizationPercentage,
   canAccommodateQuantity,
   capacityStatus,
+  computeBoundingBox,
   resolveCropCompatibility,
   toKg,
 } from "./warehouse-capacity";
@@ -271,16 +272,18 @@ export class WarehouseAvailabilityService {
     if (cached) return cached;
 
     // Bounding box in degrees: ~111 km per degree of latitude, same
-    // approximation Module 6 uses (market-intelligence.service.ts).
-    const degreeDelta = input.radiusKm / 111;
+    // approximation Module 6 uses (market-intelligence.service.ts) — see
+    // computeBoundingBox() in warehouse-capacity.ts, shared with Part 5's
+    // recommendation candidate discovery.
+    const bbox = computeBoundingBox(input.latitude, input.longitude, input.radiusKm);
     const visibility = visibilityFilter(actor);
 
     const candidates = await this.warehouses.findNearbyCandidates(
       {
-        minLatitude: input.latitude - degreeDelta,
-        maxLatitude: input.latitude + degreeDelta,
-        minLongitude: input.longitude - degreeDelta,
-        maxLongitude: input.longitude + degreeDelta,
+        minLatitude: bbox.minLatitude,
+        maxLatitude: bbox.maxLatitude,
+        minLongitude: bbox.minLongitude,
+        maxLongitude: bbox.maxLongitude,
         status: visibility.status,
         isActiveOnly: visibility.isActiveOnly,
         cropId: input.cropId,

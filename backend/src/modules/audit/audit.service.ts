@@ -91,7 +91,14 @@ export type AuditAction =
   // Module 9 Part 2 — Warehouse Intelligence. Only capacity mutations are
   // audited; nearby search and availability reads are routine reads, same
   // reasoning as Module 6/8's own read-vs-write audit split above.
-  | "WAREHOUSE_CAPACITY_UPDATED";
+  | "WAREHOUSE_CAPACITY_UPDATED"
+  // Module 9 Part 3 — Storage Conditions, Crop Suitability & Storage
+  // Constraints. Only configuration writes are audited; suitability and
+  // storage-eligibility reads are routine reads, same split as above —
+  // this part's own explicit "do not audit ordinary read-only suitability
+  // checks" instruction.
+  | "WAREHOUSE_STORAGE_CONDITIONS_UPDATED"
+  | "CROP_STORAGE_REQUIREMENT_UPDATED";
 
 export interface AuditEvent {
   actorUserId?: string | null;

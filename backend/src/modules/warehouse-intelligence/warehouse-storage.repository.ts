@@ -17,6 +17,15 @@ export interface CreateWarehouseStorageUnitData {
   humidityControlled?: boolean;
   minHumidity?: number | null;
   maxHumidity?: number | null;
+  // Module 9 Part 3 — declared storage-condition capability flags. Left
+  // undefined (never defaulted to false) so a freshly created unit starts
+  // with these genuinely unknown, exactly like a fresh
+  // WarehouseCropCapability row starts with no configured guidance.
+  ventilationAvailable?: boolean | null;
+  coldStorageAvailable?: boolean | null;
+  controlledAtmosphereAvailable?: boolean | null;
+  pestControlAvailable?: boolean | null;
+  moistureControlAvailable?: boolean | null;
 }
 
 export interface UpdateWarehouseStorageUnitData {
@@ -31,6 +40,12 @@ export interface UpdateWarehouseStorageUnitData {
   humidityControlled?: boolean;
   minHumidity?: number | null;
   maxHumidity?: number | null;
+  // Module 9 Part 3 additions — see CreateWarehouseStorageUnitData above.
+  ventilationAvailable?: boolean | null;
+  coldStorageAvailable?: boolean | null;
+  controlledAtmosphereAvailable?: boolean | null;
+  pestControlAvailable?: boolean | null;
+  moistureControlAvailable?: boolean | null;
   isActive?: boolean;
 }
 
@@ -77,6 +92,11 @@ export class PrismaWarehouseStorageRepository implements WarehouseStorageReposit
         humidityControlled: data.humidityControlled ?? false,
         minHumidity: data.minHumidity ?? null,
         maxHumidity: data.maxHumidity ?? null,
+        ventilationAvailable: data.ventilationAvailable ?? null,
+        coldStorageAvailable: data.coldStorageAvailable ?? null,
+        controlledAtmosphereAvailable: data.controlledAtmosphereAvailable ?? null,
+        pestControlAvailable: data.pestControlAvailable ?? null,
+        moistureControlAvailable: data.moistureControlAvailable ?? null,
       },
     });
   }
@@ -96,6 +116,15 @@ export class PrismaWarehouseStorageRepository implements WarehouseStorageReposit
         ...(data.humidityControlled !== undefined ? { humidityControlled: data.humidityControlled } : {}),
         ...(data.minHumidity !== undefined ? { minHumidity: data.minHumidity } : {}),
         ...(data.maxHumidity !== undefined ? { maxHumidity: data.maxHumidity } : {}),
+        ...(data.ventilationAvailable !== undefined ? { ventilationAvailable: data.ventilationAvailable } : {}),
+        ...(data.coldStorageAvailable !== undefined ? { coldStorageAvailable: data.coldStorageAvailable } : {}),
+        ...(data.controlledAtmosphereAvailable !== undefined
+          ? { controlledAtmosphereAvailable: data.controlledAtmosphereAvailable }
+          : {}),
+        ...(data.pestControlAvailable !== undefined ? { pestControlAvailable: data.pestControlAvailable } : {}),
+        ...(data.moistureControlAvailable !== undefined
+          ? { moistureControlAvailable: data.moistureControlAvailable }
+          : {}),
         ...(data.isActive !== undefined ? { isActive: data.isActive } : {}),
       },
     });

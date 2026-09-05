@@ -153,3 +153,45 @@ export function resolveCropCompatibility(
   if (!resolved) return "UNKNOWN";
   return resolved.compatibility === "COMPATIBLE" ? "SUPPORTED" : "UNSUPPORTED";
 }
+
+/**
+ * Module 9 Part 4 — resolves the configured maximum storage duration for
+ * a (warehouse, crop) pair from the same WarehouseCropCapability rows
+ * resolveCropCompatibility() above already reads, using the identical
+ * unit-scoped-overrides-warehouse-wide resolution order (see that
+ * function's own comment) rather than a second, differently-ordered
+ * lookup. Returns null — never a fabricated default — when no row
+ * configures a duration for this pair, exactly like maxStorageDurationDays
+ * itself already returns null on the raw row.
+ */
+export function resolveMaxStorageDurationDays(
+  rows: Array<{ storageUnitId: string | null; maxStorageDurationDays: number | null }>,
+  storageUnitId?: string | null,
+): number | null {
+  const unitScoped = storageUnitId ? rows.find((r) => r.storageUnitId === storageUnitId) : undefined;
+  const warehouseWide = rows.find((r) => r.storageUnitId === null);
+  const resolved = unitScoped ?? warehouseWide;
+  return resolved?.maxStorageDurationDays ?? null;
+}
+
+/**
+ * Shared degrees-per-km approximation (~111 km per degree of latitude) —
+ * the same one Module 6's own nearby-market search uses. Extracted here
+ * (Part 5) so both this module's own nearby-warehouse search (Part 2's
+ * WarehouseAvailabilityService.searchNearby) and the recommendation
+ * engine's candidate discovery (Part 5) read one formula instead of two
+ * copies that could silently drift apart.
+ */
+export function computeBoundingBox(
+  latitude: number,
+  longitude: number,
+  radiusKm: number,
+): { minLatitude: number; maxLatitude: number; minLongitude: number; maxLongitude: number } {
+  const degreeDelta = radiusKm / 111;
+  return {
+    minLatitude: latitude - degreeDelta,
+    maxLatitude: latitude + degreeDelta,
+    minLongitude: longitude - degreeDelta,
+    maxLongitude: longitude + degreeDelta,
+  };
+}

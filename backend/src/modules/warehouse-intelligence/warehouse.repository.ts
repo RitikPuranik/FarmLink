@@ -105,6 +105,24 @@ export interface WarehouseRepository {
    * automatically.
    */
   findNearbyCandidates(bbox: BoundingBoxFilters, limit: number): Promise<WarehouseWithCapacity[]>;
+
+  // ---------------------------------------------------------------------
+  // Module 9 Part 5 addition
+  // ---------------------------------------------------------------------
+
+  /**
+   * Bounded, indexed candidate query for recommendation requests made
+   * without a location (build spec: "given a crop or lot, optional
+   * location ..."). Filters in SQL on an existing active
+   * WarehouseCropCapability row for this crop — never "load every
+   * warehouse and filter in memory" — mirroring findNearbyCandidates()'s
+   * own bounded-query discipline, just without a bounding box. Rows with
+   * no capability row at all for this crop are excluded here rather than
+   * surfaced as UNKNOWN compatibility candidates, since a
+   * location-less/crop-only search over the *entire* warehouse table
+   * would otherwise have no natural bound at all.
+   */
+  findCandidatesByCrop(cropId: string, filters: { status?: WarehouseStatus; isActiveOnly?: boolean }, limit: number): Promise<WarehouseWithCapacity[]>;
 }
 
 export class PrismaWarehouseRepository implements WarehouseRepository {
@@ -204,6 +222,21 @@ export class PrismaWarehouseRepository implements WarehouseRepository {
       // exact tie-breaking (distance/capacity/canAccommodate) happens once
       // in the service after the Haversine pass, per this part's
       // documented sort order.
+      orderBy: { createdAt: "asc" },
+      take: safeLimit,
+    }) as unknown as Promise<WarehouseWithCapacity[]>;
+  }
+
+  findCandidatesByCrop(cropId: string, filters: { status?: WarehouseStatus; isActiveOnly?: boolean }, limit: number) {
+    const safeLimit = Math.min(MAX_LIST_LIMIT * 2, Math.max(1, Math.trunc(limit) || MAX_LIST_LIMIT));
+
+    return this.prisma.warehouse.findMany({
+      where: {
+        capabilities: { some: { cropId, isActive: true } },
+        ...(filters.status ? { status: filters.status } : {}),
+        ...(filters.isActiveOnly ? { isActive: true } : {}),
+      },
+      include: { ...CAPACITY_INCLUDE, capabilities: { where: { isActive: true, cropId }, include: { crop: true } } },
       orderBy: { createdAt: "asc" },
       take: safeLimit,
     }) as unknown as Promise<WarehouseWithCapacity[]>;

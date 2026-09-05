@@ -72,6 +72,16 @@ import { PrismaWarehouseRepository } from "./modules/warehouse-intelligence/ware
 import { PrismaWarehouseStorageRepository } from "./modules/warehouse-intelligence/warehouse-storage.repository";
 import { PrismaWarehouseCapabilityRepository } from "./modules/warehouse-intelligence/warehouse-capability.repository";
 import { WarehouseAvailabilityService } from "./modules/warehouse-intelligence/warehouse-availability.service";
+import { PrismaCropStorageRequirementRepository } from "./modules/warehouse-intelligence/crop-storage-requirement.repository";
+import { WarehouseSuitabilityService } from "./modules/warehouse-intelligence/warehouse-suitability.service";
+import { WarehouseSuitabilityAnalysisService } from "./modules/warehouse-intelligence/warehouse-risk-analysis.service";
+import { PrismaStorageRateRepository } from "./modules/warehouse-intelligence/storage-rate.repository";
+import { WarehouseRecommendationService } from "./modules/warehouse-intelligence/warehouse-recommendation.service";
+import {
+  StorageIntelligenceProvider,
+  UnavailableStorageIntelligenceProvider,
+} from "./modules/warehouse-intelligence/storage-intelligence-provider";
+import { WarehouseStorageIntelligenceProvider } from "./modules/warehouse-intelligence/storage-intelligence-provider.service";
 import { createWarehouseIntelligenceRouter } from "./modules/warehouse-intelligence/warehouse-intelligence.routes";
 
 export interface AppDependencies {
@@ -106,6 +116,17 @@ export interface AppDependencies {
   // app defaults to UnavailableSellStoreAIProvider, and tests can inject a
   // fake provider to exercise the success/failure advisory paths.
   sellStoreAiProvider?: SellStoreAIProvider;
+  // Module 9 Part 6 — Warehouse Intelligence Integration boundary. Same
+  // optional/default pattern as sellStoreAiProvider above: server.ts
+  // leaves this unset so the app defaults to the real
+  // WarehouseStorageIntelligenceProvider (Module 9 is fully implemented
+  // in this codebase, unlike the AI advisory layer, so the default here
+  // is the real provider, not an Unavailable stub); tests can inject
+  // UnavailableStorageIntelligenceProvider or a fake to exercise Module
+  // 8's graceful-degradation paths once Module 8 depends on this
+  // interface — see storage-intelligence-provider.ts's own module doc
+  // for exactly what that wiring step requires.
+  storageIntelligenceProvider?: StorageIntelligenceProvider;
 }
 
 export function createApp(deps: AppDependencies): Express {
@@ -260,6 +281,46 @@ export function createApp(deps: AppDependencies): Express {
     referenceDataService,
     deps.auditService,
   );
+  // Module 9 Part 3 — Storage Conditions, Crop Suitability & Storage
+  // Constraints. Depends on warehouseAvailabilityService (reused for the
+  // capacity half of the combined eligibility endpoint) rather than
+  // duplicating capacity logic — see WarehouseSuitabilityService's own
+  // comment.
+  const cropStorageRequirementRepository = new PrismaCropStorageRequirementRepository(deps.prisma);
+  const warehouseSuitabilityService = new WarehouseSuitabilityService(
+    warehouseRepository,
+    warehouseStorageRepository,
+    cropStorageRequirementRepository,
+    referenceDataService,
+    warehouseAvailabilityService,
+    deps.auditService,
+  );
+  // Module 9 Part 4 — Warehouse Suitability & Risk Analysis. Depends on
+  // both warehouseAvailabilityService (Part 2, capacity/compatibility)
+  // and warehouseSuitabilityService (Part 3, environmental suitability)
+  // rather than recomputing either — see the service's own comment.
+  const warehouseSuitabilityAnalysisService = new WarehouseSuitabilityAnalysisService(
+    warehouseRepository,
+    warehouseAvailabilityService,
+    warehouseSuitabilityService,
+    referenceDataService,
+  );
+  // Module 9 Part 5 — Warehouse Recommendation & Ranking Engine. Depends
+  // on Part 4's analysis service (never re-deriving suitability) and the
+  // existing Part 1 StorageRateRepository (never re-implementing pricing
+  // storage) — see the service's own comment.
+  const storageRateRepository = new PrismaStorageRateRepository(deps.prisma);
+  const warehouseRecommendationService = new WarehouseRecommendationService(
+    warehouseRepository,
+    warehouseSuitabilityAnalysisService,
+    storageRateRepository,
+    referenceDataService,
+  );
+  // Module 9 Part 6 — Warehouse Intelligence Integration boundary. Real
+  // by default (see AppDependencies.storageIntelligenceProvider's own
+  // comment on why, unlike the AI advisory layer's Unavailable default).
+  const storageIntelligenceProvider: StorageIntelligenceProvider =
+    deps.storageIntelligenceProvider ?? new WarehouseStorageIntelligenceProvider(warehouseRecommendationService);
 
   app.get("/health", (_req, res) => res.status(200).json({ success: true, data: { status: "ok" } }));
 
@@ -319,8 +380,28 @@ export function createApp(deps: AppDependencies): Express {
   app.use("/api", createBuyerMatchingRouter(buyerMatchingService, deps.authRepository, deps.auditService));
   app.use(
     "/api/warehouses",
-    createWarehouseIntelligenceRouter(warehouseAvailabilityService, deps.authRepository, deps.auditService),
+    createWarehouseIntelligenceRouter(
+      warehouseAvailabilityService,
+      warehouseSuitabilityService,
+      warehouseSuitabilityAnalysisService,
+      warehouseRecommendationService,
+      deps.authRepository,
+      deps.auditService,
+    ),
   );
+
+  // Module 9 Part 6 — the boundary above (storageIntelligenceProvider) is
+  // fully implemented and tested, but this repository excerpt does not
+  // include Module 8's actual source, so DecisionInputResolverService's
+  // constructor below is left untouched rather than guessed at — passing
+  // an extra constructor argument it may not accept would risk breaking
+  // real, unverifiable code. Exposed via app.locals as a safe interim
+  // handoff point until Module 8 is updated to accept it as a fourth
+  // constructor parameter — see storage-intelligence-provider.ts's own
+  // module doc and this module's documentation for the exact, minimal
+  // change Module 8 needs (constructor parameter + one resolveInput()
+  // call + SellStoreInputSnapshot.storage mapping).
+  app.locals.storageIntelligenceProvider = storageIntelligenceProvider;
 
   // Module 8 — Sell vs Store Decision Engine
   const sellStoreDecisionRepository = new SellStoreDecisionRepository(deps.prisma);
