@@ -262,6 +262,12 @@ model User {
   // or more warehouses directly, as opposed to warehouses owned by an Fpo.
   ownedWarehouses Warehouse[]
 
+  // Module 14 — every Net Realization calculation ever requested by this
+  // user (SetNull on delete, same reasoning as SellStoreDecision above: a
+  // deleted/deactivated user must never take a historical, already-shown
+  // calculation down with them).
+  netRealizationCalculations NetRealizationCalculation[]
+
   @@index([mobile])
   @@index([email])
   @@index([publicId])
@@ -552,6 +558,9 @@ model Crop {
   // for why this is never auto-created). Optional 1:1, mirroring
   // FarmerProfile's own optional-relation convention.
   storageRequirement CropStorageRequirement?
+
+  // Module 14
+  netRealizationCalculations NetRealizationCalculation[]
 
   @@map("crops")
 }
@@ -916,6 +925,11 @@ model CropLot {
   // (foundation only in Part 1: no reservation actually adjusts
   // availableQuantityKg yet — see StorageReservation's own comment).
   storageReservations StorageReservation[]
+
+  // Module 14 — every Net Realization calculation ever run against this
+  // lot. Restrict, matching sellStoreDecisions/storageReservations above:
+  // a lot must never disappear out from under a historical calculation.
+  netRealizationCalculations NetRealizationCalculation[]
 
   @@index([farmerId, status])
   @@index([fpoId, status])
@@ -1509,6 +1523,13 @@ model TradeOffer {
   demand        BuyerDemand?         @relation(fields: [buyerDemandId], references: [id], onDelete: SetNull)
   buyer         BuyerProfile         @relation("OfferBuyer", fields: [buyerId], references: [id], onDelete: Restrict)
   revisions     TradeOfferRevision[]
+
+  // Module 14 — Net Realization calculations that resolved their sale
+  // price from this specific offer (whether ACCEPTED or still SENT/
+  // COUNTERED — see net-realization-input-resolver.service.ts's own price
+  // priority comment for why a non-accepted offer can still be used for an
+  // explicit "what if I take this offer" calculation).
+  netRealizationCalculations NetRealizationCalculation[]
 
   @@index([lotId, status])
   @@index([buyerId, status])
@@ -2109,4 +2130,149 @@ model CropStorageRequirement {
 
   @@index([cropId])
   @@map("crop_storage_requirements")
+}
+
+// ---------------------------------------------------------------------------
+// Module 14 — Net Realization Calculator
+//
+// Answers "if the farmer sells through a particular buyer/market/offer,
+// approximately how much will they actually realize after known costs and
+// deductions?" Deterministic only — no AI/ML/forecasting is used anywhere
+// in this module (see net-realization-calculator.service.ts).
+//
+// This module never fabricates a cost or a price. A calculation's whole
+// point is to be honest about what is and is not actually known:
+//   - grossRevenue/totalKnownCosts/totalEstimatedCosts/netRealization are
+//     nullable because a calculation that never resolved a sale price
+//     never even attempts arithmetic on it (see COMPLETENESS below).
+//   - A cost category with no real data (ACTUAL/ESTIMATED/USER_PROVIDED)
+//     behind it is never subtracted as if it were zero — it is recorded in
+//     calculationMetadata.omittedComponents instead.
+//   - inputSnapshot/calculationMetadata are immutable once persisted
+//     (Part H/Part T): a later engine version must never rewrite what an
+//     already-shown historical calculation said, mirroring
+//     SellStoreDecision's own inputSnapshot/decisionMetadata pattern.
+//
+// No Transport/Logistics, Payment, or Transaction Ledger module exists yet
+// in this schema (see PROJECT_CONTEXT.md's "Next planned business
+// modules"), so TRANSPORT/LOADING/UNLOADING/PACKAGING/COMMISSION/
+// MARKET_FEE/TAX/INSURANCE can only ever be resolved from a value the
+// caller explicitly supplies (USER_PROVIDED) today — never invented as a
+// per-km rate or a guessed percentage. STORAGE is the one category with a
+// real, non-fabricated ESTIMATED source already available: Module 9 Part
+// 6's StorageIntelligenceProvider (see net-realization-input-resolver.
+// service.ts). Every other category's automatic resolution is left for
+// the future logistics/payment/ledger modules Part T describes — adding
+// them later only means implementing another CostResolver, never touching
+// the calculation engine itself.
+// ---------------------------------------------------------------------------
+
+enum NetRealizationStatus {
+  PENDING
+  COMPLETED
+  INSUFFICIENT_DATA
+  FAILED
+}
+
+// How much a given number can be trusted. Never conflated with AI
+// confidence (this module has none) — this only ever describes where a
+// figure came from.
+enum RealizationValueSource {
+  ACTUAL
+  ESTIMATED
+  USER_PROVIDED
+  MARKET_REFERENCE
+  UNKNOWN
+}
+
+// Where the sale price used for grossRevenue actually came from. Kept
+// separate from RealizationValueSource (every one of these types still
+// carries its own RealizationValueSource) so the DTO can say *both*
+// "this came from an accepted trade offer" *and* "that makes it ACTUAL"
+// without conflating the two questions.
+enum NetRealizationPriceSourceType {
+  ACCEPTED_OFFER
+  OFFER
+  USER_PROVIDED
+  MARKET_REFERENCE
+  UNAVAILABLE
+}
+
+enum NetRealizationCostCategory {
+  TRANSPORT
+  LOADING
+  UNLOADING
+  PACKAGING
+  STORAGE
+  COMMISSION
+  MARKET_FEE
+  TAX
+  INSURANCE
+  OTHER
+}
+
+enum RealizationCompleteness {
+  COMPLETE
+  PARTIAL
+  INSUFFICIENT
+}
+
+// Immutable per-calculation record (Part H: historical calculations are
+// never recomputed or rewritten in place — a pricing-logic change only
+// ever affects the next fresh calculation, tracked via
+// calculationMetadata.calculationVersion).
+model NetRealizationCalculation {
+  id       String @id @default(uuid())
+  publicId String @unique @default(uuid())
+
+  lotId  String
+  cropId String
+
+  requestedByUserId String?
+
+  status NetRealizationStatus @default(PENDING)
+
+  currency String @default("INR")
+
+  // The specific offer (if any) the resolved sale price came from —
+  // ACCEPTED_OFFER or an explicit OFFER request (see
+  // NetRealizationPriceSourceType above). Null whenever the price came
+  // from USER_PROVIDED or MARKET_REFERENCE instead.
+  priceSourceOfferId String?
+  priceSourceType    NetRealizationPriceSourceType?
+  salePricePerUnit   Decimal?                        @db.Decimal(14, 2)
+  saleQuantityKg     Decimal?                        @db.Decimal(14, 2)
+
+  grossRevenue           Decimal? @db.Decimal(16, 2)
+  totalKnownCosts        Decimal? @db.Decimal(16, 2)
+  totalEstimatedCosts    Decimal? @db.Decimal(16, 2)
+  totalUserProvidedCosts Decimal? @db.Decimal(16, 2)
+  totalDeductions        Decimal? @db.Decimal(16, 2)
+
+  netRealization Decimal? @db.Decimal(16, 2)
+
+  completeness          RealizationCompleteness?
+  dataCompletenessScore Decimal?                  @db.Decimal(5, 4)
+
+  // Immutable snapshot of every input actually resolved/used (the
+  // NetRealizationInput contract — see net-realization.types.ts).
+  inputSnapshot Json?
+
+  // Included/omitted cost components, warnings, assumptions, engine
+  // version — the DecisionMetadata-equivalent for this module (see
+  // net-realization-orchestration.service.ts's NetRealizationMetadata).
+  calculationMetadata Json?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  lot             CropLot     @relation(fields: [lotId], references: [id], onDelete: Restrict)
+  crop            Crop        @relation(fields: [cropId], references: [id], onDelete: Restrict)
+  requestedByUser User?       @relation(fields: [requestedByUserId], references: [id], onDelete: SetNull)
+  priceSourceOffer TradeOffer? @relation(fields: [priceSourceOfferId], references: [id], onDelete: SetNull)
+
+  @@index([lotId, createdAt])
+  @@index([requestedByUserId])
+  @@index([status])
+  @@map("net_realization_calculations")
 }

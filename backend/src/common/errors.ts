@@ -61,6 +61,16 @@ export type ErrorCode =
   | "INVALID_STORAGE_REQUIREMENT"
   // Module 9 Part 4 — Warehouse Suitability & Risk Analysis.
   | "INVALID_DURATION"
+  // Module 14 — Net Realization Calculator. "Lot not found" and
+  // "calculation not found" both use the generic NotFoundError below
+  // (same convention Module 4/8 already use for their own lookups) rather
+  // than a Net-Realization-specific NOT_FOUND code; INVALID_QUANTITY above
+  // is reused as-is for an invalid override quantity. INSUFFICIENT_DATA
+  // is a valid calculation *outcome* (Part I), never an error, so there is
+  // deliberately no "insufficient data" error code here.
+  | "INVALID_SALE_PRICE"
+  | "INVALID_COST_AMOUNT"
+  | "OFFER_NOT_FOUND_FOR_LOT"
   | "UNEXPECTED_ERROR";
 
 export class AppError extends Error {
@@ -169,6 +179,30 @@ export class WarehouseDomainError extends AppError {
       | "INVALID_STORAGE_CONDITION"
       | "INVALID_STORAGE_REQUIREMENT"
       | "INVALID_DURATION"
+    >,
+    statusCode = 422,
+  ) {
+    super(message, statusCode, code);
+  }
+}
+
+/**
+ * Module 14's equivalent of WarehouseDomainError/MarketDomainError — its
+ * own named class for the same "a reviewer grepping for Net Realization
+ * errors should find a Net-Realization-named class" reasoning.
+ * An unresolvable sale price is a business-rule *outcome* the
+ * orchestration service turns into a valid INSUFFICIENT_DATA result
+ * rather than an exception (Part I: "INSUFFICIENT_DATA is a valid
+ * calculation outcome... NOT necessarily an exception") — this class is
+ * for the remaining cases that genuinely are request errors: a malformed
+ * offer reference, an invalid override amount, or an invalid quantity.
+ */
+export class NetRealizationDomainError extends AppError {
+  constructor(
+    message: string,
+    code: Extract<
+      ErrorCode,
+      "INVALID_SALE_PRICE" | "INVALID_QUANTITY" | "INVALID_COST_AMOUNT" | "UNSUPPORTED_UNIT" | "OFFER_NOT_FOUND_FOR_LOT"
     >,
     statusCode = 422,
   ) {

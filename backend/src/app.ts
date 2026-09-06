@@ -83,6 +83,11 @@ import {
 } from "./modules/warehouse-intelligence/storage-intelligence-provider";
 import { WarehouseStorageIntelligenceProvider } from "./modules/warehouse-intelligence/storage-intelligence-provider.service";
 import { createWarehouseIntelligenceRouter } from "./modules/warehouse-intelligence/warehouse-intelligence.routes";
+import { NetRealizationRepository } from "./modules/net-realization/net-realization.repository";
+import { NetRealizationInputResolverService } from "./modules/net-realization/net-realization-input-resolver.service";
+import { NetRealizationCalculatorService } from "./modules/net-realization/net-realization-calculator.service";
+import { NetRealizationOrchestrationService } from "./modules/net-realization/net-realization-orchestration.service";
+import { createNetRealizationRouter } from "./modules/net-realization/net-realization.routes";
 
 export interface AppDependencies {
   authRepository: AuthRepository;
@@ -429,6 +434,37 @@ export function createApp(deps: AppDependencies): Express {
     "/api/sell-vs-store",
     createSellStoreRouter(
       sellStoreOrchestrationService,
+      deps.cropLotRepository,
+      lotAuthorization,
+      farmerProfileResolver,
+      deps.authRepository,
+      deps.auditService
+    )
+  );
+
+  // Module 14 — Net Realization Calculator. Reuses marketIntelligenceRepository
+  // and storageIntelligenceProvider constructed above (Modules 6 and 9
+  // respectively) rather than standing up second instances of either.
+  const netRealizationRepository = new NetRealizationRepository(deps.prisma);
+  const netRealizationInputResolverService = new NetRealizationInputResolverService(
+    deps.cropLotRepository,
+    deps.prisma,
+    marketIntelligenceRepository,
+    storageIntelligenceProvider
+  );
+  const netRealizationCalculatorService = new NetRealizationCalculatorService();
+  const netRealizationOrchestrationService = new NetRealizationOrchestrationService(
+    deps.cropLotRepository,
+    netRealizationRepository,
+    netRealizationInputResolverService,
+    netRealizationCalculatorService,
+    deps.auditService
+  );
+
+  app.use(
+    "/api",
+    createNetRealizationRouter(
+      netRealizationOrchestrationService,
       deps.cropLotRepository,
       lotAuthorization,
       farmerProfileResolver,

@@ -22,8 +22,9 @@
 6. Module 6 — Market Intelligence & Price Discovery: implemented
 7. Module 7 — Buyer Management & Matching: implemented
 8. Module 8 — Sell vs Store Decision Engine: implemented (deterministic engine authoritative; optional/advisory-only AI layer — see `docs/modules/module-08-sell-vs-store.md`)
+14. Module 14 — Net Realization Calculator: implemented (fully deterministic, no AI/ML; never fabricates a missing price or cost — see `docs/modules/module-14-net-realization.md`)
 
-Next planned business modules include Price Forecasting, Warehouse, RFQ/Offers, Net Realization, Logistics, Shipment/Tracking, Delivery, Payment Status, Ledger, Grievance, Notifications, multilingual/voice/offline, Risk, Analytics, Admin/Government, integrations, and further audit/security/monitoring and AI platform capabilities.
+Next planned business modules include Logistics, Shipment/Tracking, Delivery, Payment Status, Ledger, Grievance, Notifications, multilingual/voice/offline, Risk, Analytics, Admin/Government, integrations, and further audit/security/monitoring and AI platform capabilities.
 
 ## Backend — Actual Current Stack
 - Express.js 4.x

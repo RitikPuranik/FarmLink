@@ -89,6 +89,14 @@ const ALLOWED_EVENTS = new Set([
   // Module 9 Part 5 — Warehouse Recommendation & Ranking Engine.
   "warehouse_recommendation_requested",
   "warehouse_recommendation_generated",
+  // Module 14 — Net Realization Calculator (Part P). Carries only
+  // completeness/status, never exact financial amounts or PII — see this
+  // module's own trackEvent() call sites, which never pass grossRevenue,
+  // netRealization, or any cost figure as a property.
+  "net_realization_requested",
+  "net_realization_completed",
+  "net_realization_insufficient_data",
+  "net_realization_failed",
 ]);
 
 // Defense in depth: even if a caller accidentally passes a sensitive key in

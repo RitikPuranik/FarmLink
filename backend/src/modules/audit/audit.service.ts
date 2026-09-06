@@ -98,7 +98,16 @@ export type AuditAction =
   // this part's own explicit "do not audit ordinary read-only suitability
   // checks" instruction.
   | "WAREHOUSE_STORAGE_CONDITIONS_UPDATED"
-  | "CROP_STORAGE_REQUIREMENT_UPDATED";
+  | "CROP_STORAGE_REQUIREMENT_UPDATED"
+  // Module 14 — Net Realization Calculator. Every calculation outcome is
+  // audited (created/completed/insufficient-data/failed) per Part P's own
+  // "audit: calculation created, completed, failed" instruction — ordinary
+  // GET reads of a persisted calculation are intentionally not audited,
+  // same read-vs-write split as every module above.
+  | "NET_REALIZATION_CALCULATION_CREATED"
+  | "NET_REALIZATION_CALCULATION_COMPLETED"
+  | "NET_REALIZATION_CALCULATION_INSUFFICIENT_DATA"
+  | "NET_REALIZATION_CALCULATION_FAILED";
 
 export interface AuditEvent {
   actorUserId?: string | null;
