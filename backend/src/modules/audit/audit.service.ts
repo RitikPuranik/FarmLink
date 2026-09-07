@@ -65,8 +65,16 @@ export type AuditAction =
   // Module 6 — Market intelligence operations that materially affect an
   // actor or data pipeline (routine chart reads are intentionally absent).
   | "MARKET_DATA_IMPORTED"
+  | "MARKET_DATA_SEEDED"
   | "MARKET_DATA_SYNCED"
   | "MARKET_DATA_SYNC_GAP_DETECTED"
+  // Warehouse Ecosystem Ingestion Layer. "Provider configuration changes"
+  // (Part 29) never gets its own action — there is no runtime-mutable
+  // provider config in this implementation, only env-var-gated
+  // enable/disable (see config/env.ts's WAREHOUSE_*_PROVIDER_ENABLED),
+  // which is deploy-time, not an auditable in-app action.
+  | "WAREHOUSE_PROVIDER_SYNC_INITIATED"
+  | "WAREHOUSE_PROVIDER_SYNC_COMPLETED"
   | "MARKET_RECOMMENDATION_GENERATED"
   // Module 7 — buyer verification, demand lifecycle and negotiations.
   | "BUYER_PROFILE_CREATED"

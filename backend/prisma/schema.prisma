@@ -1769,6 +1769,16 @@ enum WarehouseStatus {
 enum WarehouseOwnerType {
   USER
   FPO
+  // Module 9 Warehouse Ecosystem Ingestion Layer — a warehouse ingested
+  // from an external data source with no FarmLink user/FPO behind it.
+  // ownerUserId/ownerFpoId stay null for these rows; "owner" here means
+  // "who this record's data is attributed to", not "who legally operates
+  // it in FarmLink" (see WarehouseSourceReference for the actual
+  // provenance/idempotency record — this enum value only has to make the
+  // existing required, non-null Warehouse.ownerType column meaningful for
+  // a row nobody in FarmLink owns).
+  GOVERNMENT
+  PRIVATE_PARTNER
 }
 
 // Shared between Warehouse.warehouseType (what kind of facility this is
@@ -1821,6 +1831,12 @@ model Warehouse {
   state   String
   district String
   address String?
+  // Additive, nullable — populated when a source (FarmLink form or an
+  // external provider) actually supplies one; never backfilled/guessed
+  // for existing rows. Used only as a conservative duplicate-detection
+  // signal by the ingestion layer (see warehouse-duplicate-detection.
+  // service.ts), never required by anything pre-existing.
+  pincode String?
 
   latitude  Float?
   longitude Float?
@@ -1851,6 +1867,15 @@ model Warehouse {
   capabilities WarehouseCropCapability[]
   reservations StorageReservation[]
   rates        StorageRate[]
+  // Warehouse Ecosystem Ingestion Layer — zero or more external-source
+  // identities this warehouse is known under (see WarehouseSourceReference).
+  // A FarmLink-created warehouse (ownerType USER/FPO) normally has none;
+  // its identity is its own id/publicId, never an artificial external ID
+  // (Part 12 of the ingestion spec). A row may accumulate more than one
+  // reference over time (e.g. matched to both a government registry entry
+  // and a private partner entry), which is exactly why this is a separate
+  // table rather than columns on Warehouse itself.
+  sourceReferences WarehouseSourceReference[]
 
   @@index([ownerUserId])
   @@index([ownerFpoId])
@@ -1868,6 +1893,68 @@ model Warehouse {
   // than a scan as the warehouses table grows.
   @@index([latitude, longitude])
   @@map("warehouses")
+}
+
+// ---------------------------------------------------------------------------
+// Warehouse Ecosystem Ingestion Layer — external data-source provenance.
+//
+// Deliberately a separate model rather than columns bolted onto Warehouse
+// (Part 32 of the ingestion spec): a single warehouse can legitimately be
+// known to more than one external source at once (e.g. it shows up in a
+// government registry AND a private partner feed), and a FarmLink-created
+// warehouse should never be forced to carry an artificial external ID just
+// because this table exists (Part 12). One Warehouse -> many
+// WarehouseSourceReference rows; FarmLink-owned warehouses simply have
+// zero rows here, which is itself the "sourceType = FARMLINK" fact — no
+// backfill needed or wanted (Part 33: existing warehouses keep working
+// completely untouched).
+// ---------------------------------------------------------------------------
+enum WarehouseSourceType {
+  FARMLINK
+  GOVERNMENT
+  PRIVATE_PARTNER
+}
+
+model WarehouseSourceReference {
+  id          String @id @default(uuid())
+  warehouseId String
+
+  sourceType WarehouseSourceType
+  // Stable identifier for the concrete provider instance, e.g.
+  // "GOVERNMENT_WDRA" or "PRIVATE_PARTNER_ABC" — not the same as
+  // sourceType, since more than one provider can share a sourceType.
+  providerId String
+  // The provider's own stable identifier for this warehouse. Combined
+  // with providerId this is the idempotency key the sync service upserts
+  // against (Part 12) — running a sync twice must never create a second
+  // Warehouse row for the same external record.
+  externalId String
+
+  // When the source itself last reports having updated this record
+  // (nullable — many providers won't say). lastSyncedAt is FarmLink's own
+  // clock: the last time this reference was successfully written/refreshed
+  // by a sync run, regardless of what the source claims.
+  sourceUpdatedAt DateTime?
+  lastSyncedAt    DateTime?
+
+  // Non-sensitive provider payload fragments worth keeping for
+  // troubleshooting/audit (never credentials, never a full raw payload
+  // dump — see warehouse-sync.service.ts's own comment on what it stores
+  // here).
+  metadata Json?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  // Cascade: a source reference has no independent lifecycle of its own —
+  // it only ever exists to annotate a warehouse's provenance, mirroring
+  // WarehouseStorageUnit's own Cascade rationale above.
+  warehouse Warehouse @relation(fields: [warehouseId], references: [id], onDelete: Cascade)
+
+  @@unique([providerId, externalId])
+  @@index([warehouseId])
+  @@index([sourceType])
+  @@map("warehouse_source_references")
 }
 
 model WarehouseStorageUnit {

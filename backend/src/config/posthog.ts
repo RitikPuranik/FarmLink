@@ -97,6 +97,16 @@ const ALLOWED_EVENTS = new Set([
   "net_realization_completed",
   "net_realization_insufficient_data",
   "net_realization_failed",
+  // Warehouse Ecosystem Ingestion Layer — provider sync lifecycle only.
+  // Never includes provider credentials, raw provider payloads, or
+  // precise coordinates (BLOCKED_PROPERTY_KEYS below already strips
+  // latitude/longitude defensively).
+  "warehouse_provider_sync_requested",
+  "warehouse_provider_sync_completed",
+  "warehouse_provider_sync_partial",
+  "warehouse_provider_failed",
+  "warehouse_record_normalization_failed",
+  "warehouse_record_validation_failed",
 ]);
 
 // Defense in depth: even if a caller accidentally passes a sensitive key in

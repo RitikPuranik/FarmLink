@@ -83,6 +83,14 @@ import {
 } from "./modules/warehouse-intelligence/storage-intelligence-provider";
 import { WarehouseStorageIntelligenceProvider } from "./modules/warehouse-intelligence/storage-intelligence-provider.service";
 import { createWarehouseIntelligenceRouter } from "./modules/warehouse-intelligence/warehouse-intelligence.routes";
+import { FarmLinkWarehouseProvider } from "./modules/warehouse-intelligence/providers/farmlink-warehouse-provider";
+import { UnavailableGovernmentWarehouseProvider } from "./modules/warehouse-intelligence/providers/government-warehouse-provider";
+import { UnavailablePartnerWarehouseProvider } from "./modules/warehouse-intelligence/providers/partner-warehouse-provider";
+import { WarehouseProviderRegistry } from "./modules/warehouse-intelligence/providers/warehouse-provider-registry";
+import { WarehouseDuplicateDetectionService } from "./modules/warehouse-intelligence/warehouse-duplicate-detection.service";
+import { PrismaWarehouseSourceReferenceRepository } from "./modules/warehouse-intelligence/warehouse-source-reference.repository";
+import { WarehouseSyncService } from "./modules/warehouse-intelligence/warehouse-sync.service";
+import { createWarehouseIngestionRouter } from "./modules/warehouse-intelligence/warehouse-ingestion.routes";
 import { NetRealizationRepository } from "./modules/net-realization/net-realization.repository";
 import { NetRealizationInputResolverService } from "./modules/net-realization/net-realization-input-resolver.service";
 import { NetRealizationCalculatorService } from "./modules/net-realization/net-realization-calculator.service";
@@ -394,6 +402,29 @@ export function createApp(deps: AppDependencies): Express {
       deps.auditService,
     ),
   );
+
+  // Warehouse Ecosystem Ingestion Layer — the upper "where do warehouse
+  // records come from" half of Module 9, sitting entirely above the
+  // FarmLink Warehouse DB. Nothing above this line (availability,
+  // suitability, risk, recommendations, StorageIntelligenceProvider) was
+  // changed to know this exists; it only ever writes plain Warehouse /
+  // WarehouseStorageUnit rows that those services already know how to
+  // read.
+  const warehouseProviderRegistry = new WarehouseProviderRegistry([
+    new FarmLinkWarehouseProvider(),
+    new UnavailableGovernmentWarehouseProvider(),
+    new UnavailablePartnerWarehouseProvider(),
+  ]);
+  const warehouseSourceReferenceRepository = new PrismaWarehouseSourceReferenceRepository(deps.prisma);
+  const warehouseDuplicateDetectionService = new WarehouseDuplicateDetectionService(deps.prisma);
+  const warehouseSyncService = new WarehouseSyncService(
+    deps.prisma,
+    warehouseProviderRegistry,
+    warehouseSourceReferenceRepository,
+    warehouseDuplicateDetectionService,
+    deps.auditService,
+  );
+  app.use("/api/admin/warehouses", createWarehouseIngestionRouter(warehouseSyncService, deps.authRepository, deps.auditService));
 
   // Module 9 Part 6 — the boundary above (storageIntelligenceProvider) is
   // fully implemented and tested, but this repository excerpt does not

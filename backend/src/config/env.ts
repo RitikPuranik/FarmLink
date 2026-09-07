@@ -33,6 +33,26 @@ const envSchema = z.object({
   MARKET_DATA_GOV_PAGE_SIZE: z.coerce.number().int().min(1).max(1_000).default(500),
   MARKET_DATA_GOV_MAX_RETRIES: z.coerce.number().int().min(0).max(5).default(3),
   MARKET_DATA_GOV_RATE_LIMIT_MS: z.coerce.number().int().min(0).max(60_000).default(250),
+
+  // Warehouse Ecosystem Ingestion Layer — government/private-partner
+  // warehouse data sources. Both default to disabled/unconfigured: no
+  // fake endpoint is ever assumed (see
+  // UnavailableGovernmentWarehouseProvider / UnavailablePartnerWarehouseProvider).
+  // A real provider implementation, when one exists, reads its own
+  // endpoint/credential variables the same way DataGovMarketProvider reads
+  // MARKET_DATA_GOV_* above — none are declared here speculatively.
+  WAREHOUSE_GOVERNMENT_PROVIDER_ENABLED: z.coerce.boolean().default(false),
+  WAREHOUSE_GOVERNMENT_PROVIDER_TIMEOUT_MS: z.coerce.number().int().positive().default(15_000),
+  WAREHOUSE_GOVERNMENT_PROVIDER_MAX_RETRIES: z.coerce.number().int().min(0).max(5).default(3),
+
+  WAREHOUSE_PARTNER_PROVIDER_ENABLED: z.coerce.boolean().default(false),
+  WAREHOUSE_PARTNER_PROVIDER_TIMEOUT_MS: z.coerce.number().int().positive().default(15_000),
+  WAREHOUSE_PARTNER_PROVIDER_MAX_RETRIES: z.coerce.number().int().min(0).max(5).default(3),
+
+  // Batch size for warehouse-sync.service.ts's per-provider persistence
+  // loop — mirrors MARKET_DATA_GOV_PAGE_SIZE's role of keeping a single
+  // sync run from opening one unbounded transaction.
+  WAREHOUSE_SYNC_BATCH_SIZE: z.coerce.number().int().min(1).max(500).default(100),
 });
 
 const parsed = envSchema.safeParse(process.env);

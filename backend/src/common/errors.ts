@@ -61,6 +61,15 @@ export type ErrorCode =
   | "INVALID_STORAGE_REQUIREMENT"
   // Module 9 Part 4 — Warehouse Suitability & Risk Analysis.
   | "INVALID_DURATION"
+  // Warehouse Ecosystem Ingestion Layer. Reused across
+  // provider/normalization/validation/sync — see WarehouseDomainError's
+  // own comment for which of these it accepts. Diagnostics for individual
+  // rejected *records* during a sync run are plain strings/codes on the
+  // sync summary (mirroring MarketDataService.run()'s diagnostics array),
+  // never thrown as one of these — a bad external record must not crash
+  // the sync (Part 14), only a fundamental system failure should.
+  | "WAREHOUSE_PROVIDER_ERROR"
+  | "WAREHOUSE_PROVIDER_NOT_CONFIGURED"
   // Module 14 — Net Realization Calculator. "Lot not found" and
   // "calculation not found" both use the generic NotFoundError below
   // (same convention Module 4/8 already use for their own lookups) rather
@@ -179,6 +188,8 @@ export class WarehouseDomainError extends AppError {
       | "INVALID_STORAGE_CONDITION"
       | "INVALID_STORAGE_REQUIREMENT"
       | "INVALID_DURATION"
+      | "WAREHOUSE_PROVIDER_ERROR"
+      | "WAREHOUSE_PROVIDER_NOT_CONFIGURED"
     >,
     statusCode = 422,
   ) {

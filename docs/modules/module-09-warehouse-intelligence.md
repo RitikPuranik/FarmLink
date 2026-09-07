@@ -1290,3 +1290,303 @@ narrow, precedented pattern match rather than novel logic.
   work still required, by someone with access to Module 8's actual
   source, before Module 8 will actually consume any of this.
 
+
+## Warehouse Ecosystem Ingestion Layer status: Provider/Normalization/Validation/Sync — Done (Government & Private Partner sources are honestly UNAVAILABLE, not implemented against a real API)
+
+### Architecture
+
+```
+FARMLINK   GOVERNMENT   PRIVATE PARTNER
+    \           |            /
+     \          |           /
+      WAREHOUSE PROVIDER LAYER      (providers/warehouse-data-provider.ts,
+              |                      farmlink-/government-/partner-warehouse-provider.ts)
+              v
+      WarehouseProviderRegistry     (failure isolation per provider)
+              |
+              v
+      NORMALIZATION                 (warehouse-normalization.service.ts)
+              |
+              v
+      VALIDATION                    (warehouse-validation.service.ts)
+              |
+              v
+      DUPLICATE DETECTION           (warehouse-duplicate-detection.service.ts)
+              |
+              v
+      WarehouseSyncService          (warehouse-sync.service.ts — orchestrator)
+              |
+              v
+      FARMLINK WAREHOUSE DB         (Warehouse, WarehouseStorageUnit,
+              |                      WarehouseSourceReference)
+              v
+   Existing Warehouse Intelligence (Parts 1-5, completely unmodified)
+              |
+              v
+   StorageIntelligenceProvider  ->  Sell vs Store  ->  Farmer Decision
+```
+
+This is a data-ingestion layer sitting entirely **above** the existing
+Warehouse Intelligence module. Nothing below "FARMLINK WAREHOUSE DB" in
+the diagram was changed: search, availability, suitability, risk
+analysis, recommendations, `StorageIntelligenceProvider`, and Sell vs
+Store all continue reading plain `Warehouse` / `WarehouseStorageUnit`
+rows exactly as Parts 1-5 left them. This layer's only job is to get more
+(real, or honestly-absent) rows into that table safely.
+
+**Why this is a different abstraction from `StorageIntelligenceProvider`**
+(`storage-intelligence-provider.ts`): that one is consumer-facing — it
+answers "can this crop be stored here" for Sell vs Store, reading only
+the FarmLink Warehouse DB. `WarehouseDataProvider` (this layer) is
+ingestion-facing — it answers "where did this warehouse row come from."
+Sell vs Store never calls a `WarehouseDataProvider`, directly or
+indirectly, and never will: external-source complexity stops at the
+normalization boundary.
+
+### Provider architecture
+
+Three providers, one `WarehouseProviderRegistry`:
+
+- **`FarmLinkWarehouseProvider`** (`providers/farmlink-warehouse-provider.ts`)
+  — deliberately a no-op that always returns `SUCCESS` with zero records.
+  FarmLink is already the canonical store for its own warehouses (created
+  through the existing Part 1 create flow); reading them back out only to
+  normalize/validate/upsert them into the same table would be pure
+  ceremony. It still exists as a registry entry (rather than being
+  omitted) so the registry's "one status per source type" shape stays
+  uniform, and so a future need (e.g. republishing FarmLink warehouses to
+  a partner feed) has an obvious place to grow into.
+- **`UnavailableGovernmentWarehouseProvider`** /
+  **`UnavailablePartnerWarehouseProvider`** (`providers/government-warehouse-provider.ts`,
+  `providers/partner-warehouse-provider.ts`) — no real government or
+  private-partner warehouse API is configured, guessed at, or scraped.
+  Both always return an explicit `{ status: "UNAVAILABLE", errors: [{ code:
+  "..._SOURCE_NOT_CONFIGURED" }] }` result. This is never treated as a
+  system failure. `WAREHOUSE_GOVERNMENT_PROVIDER_*` /
+  `WAREHOUSE_PARTNER_PROVIDER_*` env vars (config/env.ts) are wired
+  through today so that the day a real endpoint exists, only that one
+  provider class's `fetchWarehouses()` body needs to change.
+- **`WarehouseProviderRegistry`** (`providers/warehouse-provider-registry.ts`)
+  — runs every provider in parallel; a provider that throws is converted
+  into a `FAILED` result (logged + sent to Sentry) rather than crashing
+  the run. Government failing never stops FarmLink or Partner from being
+  processed.
+
+### Normalization
+
+`warehouse-normalization.service.ts` is a pure, synchronous transform
+from `ExternalWarehouseRecord` (the canonical, provider-neutral contract
+every provider must translate into — never a Prisma model, never a raw
+external API shape) to `NormalizedWarehouseRecord`. Rules:
+
+- Every string field is trimmed; empty/whitespace-only becomes `null`.
+- Capacity unit resolution reuses `QUANTITY_ALIASES` from
+  `modules/fpo/unit-conversion.ts` (exported additively for this reason)
+  — deliberately not a second conversion table. An unresolvable unit
+  (e.g. "bags", which has no fixed weight) drops the capacity entirely
+  (`{ totalKg: null, availableKg: null }`) with an `UNSUPPORTED_CAPACITY_UNIT`
+  warning, never a guess.
+- An unparseable numeric string (e.g. `"about 500"`) produces `null` for
+  that field plus an `UNPARSEABLE_NUMBER` warning, never a thrown
+  exception and never a truncated/guessed number.
+- Storage-type hints are matched against a small explicit alias table
+  (`STORAGE_TYPE_ALIASES`); anything unrecognized returns `null`, never
+  `StorageType.OTHER` — `OTHER` means "a real, distinct type we simply
+  don't enumerate," which free text alone can never confidently
+  establish.
+- Coordinates, contact info, and temperature values are passed through
+  as-is if present and finite, `null` otherwise. Nothing is defaulted,
+  geocoded, or inferred.
+
+### Validation
+
+`warehouse-validation.service.ts` returns one of three levels:
+
+- **VALID** — no errors, no warnings.
+- **PARTIAL** — no errors, but the record carries at least one warning
+  (e.g. an unsupported capacity unit, or a malformed pincode). Still
+  persisted.
+- **INVALID** — at least one error (missing name, missing state/district,
+  out-of-range latitude/longitude, one coordinate present without the
+  other, negative/NaN/Infinity capacity, available capacity exceeding
+  total capacity, or minimum temperature exceeding maximum). Never
+  persisted; the sync service counts it as `skipped`.
+
+Optional fields missing on their own are never an error — a record with
+no coordinates, no capacity, and no contact info can still be `VALID` as
+long as its required identity (external id, provider id, name, state,
+district) is present.
+
+### Duplicate detection
+
+`warehouse-duplicate-detection.service.ts` implements exactly two
+deterministic "safe to auto-link" signals, and two conservative
+"report, never merge" signals:
+
+| Signal | Result |
+|---|---|
+| Exact latitude+longitude match against an existing warehouse | `MATCHED` |
+| Exact name + state + district match (case-insensitive) | `MATCHED` |
+| Name matches but state/district differ | `POSSIBLE_DUPLICATE` |
+| Pincode matches but name differs | `POSSIBLE_DUPLICATE` |
+| None of the above | `UNMATCHED` |
+
+`MATCHED` causes the sync service to attach a new `WarehouseSourceReference`
+to the *existing* warehouse and create nothing new. `POSSIBLE_DUPLICATE`
+still creates an independent new warehouse — it is flagged in the sync
+summary's `duplicatesFlagged` count for a human to reconcile, never
+silently merged into the candidate it named. `UNMATCHED` creates a new,
+unrelated warehouse normally.
+
+### Data model (additive only)
+
+- `WarehouseOwnerType` gained two new enum members, `GOVERNMENT` and
+  `PRIVATE_PARTNER`, for warehouses ingested from an external source with
+  no FarmLink user/FPO behind them (`ownerUserId`/`ownerFpoId` stay
+  `null` for these rows). Existing `USER`/`FPO` rows are completely
+  unaffected.
+- `Warehouse` gained one new optional column, `pincode String?`, used
+  only as a duplicate-detection signal.
+- A new model, **`WarehouseSourceReference`** (`warehouse_source_references`
+  table), is the provenance/idempotency record: `(warehouseId, sourceType,
+  providerId, externalId, sourceUpdatedAt, lastSyncedAt, metadata)`, unique
+  on `(providerId, externalId)` — the key the sync service upserts
+  against, exactly per this spec's Part 12. This is deliberately a
+  *separate table* rather than columns bolted onto `Warehouse`: a single
+  warehouse can end up known to more than one external source at once
+  (e.g. both a government registry and a private partner), and a
+  FarmLink-created warehouse should never be forced to carry an
+  artificial external id just because this table exists. A FarmLink-owned
+  warehouse simply has zero rows here — that absence *is* the "sourceType
+  = FARMLINK" fact; nothing is backfilled for existing warehouses.
+- Migration `20260906000000_add_warehouse_ingestion` is additive-only: no
+  existing column, index, table, or enum value is altered or dropped.
+
+### Field ownership / update policy
+
+- **Same provider + externalId seen again** (an existing
+  `WarehouseSourceReference` row): that provider owns these fields, so
+  they're refreshed — but only with whatever the new fetch actually
+  supplied (`record.field ?? warehouse.field`); a field the new fetch
+  happened to omit keeps its previously-known value rather than being
+  nulled out. The associated "declared capacity" `WarehouseStorageUnit`
+  (code `"SOURCE"`) is refreshed the same way; if this fetch carried no
+  capacity at all, an existing unit is left untouched rather than zeroed.
+- **Deterministically `MATCHED` to a different existing warehouse**
+  (first time this provider/externalId pair has been seen, but the
+  record lines up with a warehouse that already exists under a different
+  identity — possibly FarmLink-owned): only a new
+  `WarehouseSourceReference` is attached. The existing warehouse's fields
+  and storage units are never touched — this sync run doesn't own that
+  data.
+- **`UNMATCHED` / `POSSIBLE_DUPLICATE`**: a brand-new `Warehouse` +
+  (if capacity present) one `WarehouseStorageUnit` + one
+  `WarehouseSourceReference` are created together in one transaction.
+
+`StorageRate` is never created or touched by this layer — external
+sources may describe capacity, never FarmLink pricing (Part 21).
+Warehouses this layer creates default to `status: ACTIVE`,
+`verificationStatus: PENDING` exactly like any other new `Warehouse`
+row — a `GOVERNMENT`/`PRIVATE_PARTNER` `sourceType` never implies
+FarmLink verification.
+
+### Synchronization & transaction safety
+
+`WarehouseSyncService.run()` (`warehouse-sync.service.ts`) is the
+orchestrator: registry fetch -> per-record normalize -> validate ->
+dedupe -> persist. Each record is normalized, validated, and persisted
+independently inside its **own** `prisma.$transaction` — one malformed
+or failing record is caught, counted, and skipped; it never rolls back
+or blocks any other record in the same provider's batch, let alone the
+whole run. A provider reporting `UNAVAILABLE` or `FAILED` produces a
+`skipped`/`failed`-free provider summary with that status and moves on to
+the next provider.
+
+### Existing Warehouse Engine integration
+
+Nothing in Parts 1-5 (search, availability, suitability, risk analysis,
+recommendations) or `StorageIntelligenceProvider`/`storage-intelligence-provider.service.ts`
+was modified. Every row this layer creates is a plain `Warehouse` +
+`WarehouseStorageUnit` row using the exact same shape Parts 1-5 already
+read — an externally-sourced warehouse becomes searchable/available/
+recommendable the moment it's created, with no special-casing anywhere
+downstream. Sell vs Store continues to depend only on
+`StorageIntelligenceProvider`, never on anything in this file or the
+`providers/` folder, directly or indirectly.
+
+### Authorization
+
+`POST /api/admin/warehouses/sync` (`warehouse-ingestion.routes.ts`,
+mounted at `/api/admin/warehouses` in `app.ts`) is its own router, gated
+`requireAnyRole("ADMIN")` — deliberately not folded into the existing
+`/api/warehouses` router (reachable by FARMER/FPO_ADMIN/WAREHOUSE_OPERATOR/
+ADMIN), since nothing in the ingestion layer should ever be reachable by
+a normal farmer. No new authorization system was introduced; this reuses
+the existing `createAuthMiddleware`/`requireAnyRole` exactly as every
+other ADMIN-only route in this codebase does.
+
+### Observability
+
+- **PostHog**: `warehouse_provider_sync_requested`, `_completed`, `_partial`,
+  `warehouse_provider_failed`, `warehouse_record_normalization_failed`,
+  `warehouse_record_validation_failed` — added to the `ALLOWED_EVENTS`
+  allow-list in `config/posthog.ts`. No coordinates, credentials, or raw
+  provider payloads are ever sent.
+- **Sentry**: a provider throwing, or a record failing to persist, is
+  captured via `captureException` with `{ module: "warehouse_ingestion",
+  operation, providerId, providerType }` context — never a raw payload.
+- **Audit**: `WAREHOUSE_PROVIDER_SYNC_INITIATED` and `_COMPLETED` (added
+  to `AuditAction` in `audit.service.ts`) bracket every sync run, with
+  provider/status totals in the completion event's metadata. There is no
+  "provider configuration changed" audit action — this implementation has
+  no runtime-mutable provider configuration, only env-var-gated enable/
+  disable flags, which are deploy-time, not an in-app action.
+
+### What was deliberately not built
+
+- No real Government or Private Partner API integration — no endpoint
+  was guessed, scraped, or fabricated. Both providers are honest
+  `UNAVAILABLE` stubs, fully wired for a future real implementation.
+- No `GET /api/admin/warehouses/sync/status` endpoint — this
+  implementation keeps no persisted sync-run history (no new "ingestion
+  run" table was added to avoid unjustified schema ceremony); the sync
+  summary is returned directly from the `POST /sync` call instead.
+- No AI/LLM, no logistics optimization, no transport estimation, no
+  fabricated storage pricing, no web scraping, no second
+  `StorageIntelligenceProvider`, no rewrite of any existing warehouse
+  repository or service.
+
+### Tests
+
+`tests/unit/warehouse-normalization.service.test.ts`,
+`warehouse-validation.service.test.ts`, `warehouse-providers.test.ts`,
+`warehouse-duplicate-detection.service.test.ts`, and
+`warehouse-sync.service.test.ts` — 39 tests covering: unit normalization
+(capacity conversion, unsupported units, unparseable numbers, unrecognized
+storage types, missing-data preservation); validation levels and every
+INVALID rule; provider success/unavailable/failure-isolation; duplicate
+detection's four match states; and the sync service end-to-end (create,
+idempotent update-not-duplicate, field-ownership on refresh, link-without-
+overwrite on a deterministic match, create-and-flag on a possible
+duplicate, skip-invalid-continue-others, provider failure isolation,
+FarmLink-provider records never persisted through this path, and audit
+event recording).
+
+### Verification
+
+Same sandbox constraint as every earlier part of this module: the
+generated Prisma client's query engine binary could not be downloaded in
+this environment (`binaries.prisma.sh` returns 403 here), so
+`npx prisma generate` produces a client stub with no real model types.
+`npx tsc --noEmit` on this layer's files shows only that exact class of
+error (`"@prisma/client" has no exported member 'StorageType'/'WarehouseSourceType'`,
+`Prisma.InputJsonValue`/`Prisma.JsonNull` not found) — the same category
+already present on every pre-existing Warehouse Intelligence file
+(`warehouse.repository.ts`, `warehouse-availability.service.ts`, etc.),
+confirming this is an environment limitation, not something introduced
+by this layer. No other errors were found. `npm test` (unit): 45 of 48
+suites / 597 of 613 tests pass; the 3 failing suites
+(`sell-store-orchestration.service.test.ts`, `buyer-matching.service.test.ts`,
+`warehouse-recommendation.service.test.ts`) fail on `Prisma.Decimal is not
+a constructor` — the same pre-existing, unrelated environment limitation,
+present before this layer's changes and untouched by them.

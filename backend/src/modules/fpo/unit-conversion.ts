@@ -45,7 +45,7 @@ interface ParsedYieldUnit {
   areaUnit: AreaUnit;
 }
 
-const QUANTITY_ALIASES: Record<string, QuantityUnit> = {
+export const QUANTITY_ALIASES: Record<string, QuantityUnit> = {
   KG: "KG",
   KGS: "KG",
   KILOGRAM: "KG",
