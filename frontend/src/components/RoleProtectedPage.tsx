@@ -3,7 +3,7 @@
 import * as React from "react";
 import { useRouter } from "next/navigation";
 import { ProtectedRoute } from "@/components/ProtectedRoute";
-import { TopNav } from "@/components/TopNav";
+import { AppShell } from "@/components/AppShell";
 import { useAuth } from "@/hooks/useAuth";
 import { UserRole } from "@/types/api";
 
@@ -18,8 +18,7 @@ export function RoleProtectedPage({ role, children }: { role: UserRole; children
   return (
     <ProtectedRoute>
       <RoleCheck role={role}>
-        <TopNav />
-        {children}
+        <AppShell>{children}</AppShell>
       </RoleCheck>
     </ProtectedRoute>
   );

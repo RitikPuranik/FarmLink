@@ -4,30 +4,75 @@
 
 @layer base {
   :root {
-    --background: 40 33% 98%;
-    --foreground: 140 20% 12%;
+    /* Anndata palette — warm cream base, near-black (not green-black) dark
+       surfaces, a true olive green as the working brand color, and a warm
+       harvest-gold/yellow as the accent. No forest/dark-green hues. */
+    --background: 42 38% 97%;
+    --foreground: 40 12% 12%;
 
     --card: 0 0% 100%;
-    --card-foreground: 140 20% 12%;
+    --card-foreground: 40 12% 12%;
 
-    --primary: 142 45% 30%;
-    --primary-foreground: 0 0% 100%;
+    --primary: 78 34% 30%;
+    --primary-foreground: 42 45% 97%;
 
-    --secondary: 40 60% 92%;
-    --secondary-foreground: 140 20% 12%;
+    --secondary: 44 45% 91%;
+    --secondary-foreground: 40 12% 12%;
 
-    --muted: 40 20% 94%;
-    --muted-foreground: 140 10% 40%;
+    --muted: 42 22% 93%;
+    --muted-foreground: 40 8% 40%;
 
-    --destructive: 0 72% 45%;
+    --destructive: 6 68% 45%;
     --destructive-foreground: 0 0% 100%;
 
-    --border: 140 15% 85%;
-    --input: 140 15% 85%;
-    --ring: 142 45% 30%;
+    --border: 40 14% 86%;
+    --input: 40 14% 84%;
+    --ring: 78 34% 30%;
 
-    --radius: 0.75rem;
+    --accent: 42 72% 54%;
+    --accent-foreground: 40 25% 13%;
+
+    --success: 142 40% 30%;
+    --success-foreground: 0 0% 100%;
+    --warning: 32 88% 48%;
+    --warning-foreground: 0 0% 100%;
+
+    --sidebar-bg: 40 15% 9%;
+    --sidebar-foreground: 42 33% 96%;
+    --sidebar-muted: 40 8% 65%;
+    --sidebar-active: 42 55% 24%;
+
+    --radius: 0.875rem;
   }
+}
+
+@layer base {
+  ::-webkit-scrollbar {
+    width: 10px;
+    height: 10px;
+  }
+  ::-webkit-scrollbar-track {
+    background: transparent;
+  }
+  ::-webkit-scrollbar-thumb {
+    background: hsl(var(--border));
+    border-radius: 999px;
+  }
+}
+
+@keyframes fade-in-up {
+  from {
+    opacity: 0;
+    transform: translateY(6px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.animate-fade-in-up {
+  animation: fade-in-up 0.35s ease-out both;
 }
 
 @layer base {
@@ -39,9 +84,23 @@
        base font size generous so form fields/buttons are easy to tap and
        read without zooming. */
     font-size: 17px;
+    scroll-behavior: smooth;
   }
   body {
-    @apply bg-background text-foreground;
+    @apply bg-background text-foreground font-sans;
     -webkit-tap-highlight-color: transparent;
+    -webkit-font-smoothing: antialiased;
+  }
+  h1, h2, h3, h4 {
+    @apply font-display tracking-tight;
+  }
+}
+
+@layer utilities {
+  .bg-grain {
+    background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='120' height='120'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='2' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)' opacity='0.04'/%3E%3C/svg%3E");
+  }
+  .text-balance {
+    text-wrap: balance;
   }
 }

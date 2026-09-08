@@ -5,8 +5,9 @@ import { z } from "zod";
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { ProtectedRoute } from "@/components/ProtectedRoute";
-import { TopNav } from "@/components/TopNav";
+import { AppShell } from "@/components/AppShell";
 import { useAuth } from "@/hooks/useAuth";
+import { PageHeader } from "@/components/ui/stat-card";
 import { Card, Label, FieldError, Alert } from "@/components/ui/primitives";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -121,7 +122,8 @@ function ProfileContent() {
   // rather than replacing them. Every other role sees exactly what this
   // page showed before Module 2 (unchanged).
   return (
-    <main className="mx-auto max-w-2xl px-4 py-8">
+    <div className="mx-auto max-w-2xl">
+      <PageHeader title="Profile & settings" description="Manage your account, farm details, and security preferences." />
       {user.role === "FARMER" ? (
         <>
           <FarmerProfileSection />
@@ -131,20 +133,20 @@ function ProfileContent() {
         </>
       ) : (
         <>
-          <h1 className="mb-6 text-2xl font-semibold">Account & security</h1>
           <ChangePasswordForm />
           <SessionsCard />
         </>
       )}
-    </main>
+    </div>
   );
 }
 
 export default function ProfilePage() {
   return (
     <ProtectedRoute>
-      <TopNav />
-      <ProfileContent />
+      <AppShell>
+        <ProfileContent />
+      </AppShell>
     </ProtectedRoute>
   );
 }

@@ -17,4 +17,4 @@ export const ROLE_HOME_ROUTE: Record<UserRole, string> = {
   GOVERNMENT_VIEWER: "/government",
 };
 
-export const ROLES_WITH_LIVE_UI: UserRole[] = ["FARMER"];
+export const ROLES_WITH_LIVE_UI: UserRole[] = ["FARMER", "BUYER", "FPO_ADMIN", "ADMIN", "GOVERNMENT_VIEWER"];
