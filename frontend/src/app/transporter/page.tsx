@@ -1,12 +1,15 @@
 "use client";
-
+import * as React from "react";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { Truck, Plus, MapPin } from "lucide-react";
 import { RoleProtectedPage } from "@/components/RoleProtectedPage";
-import { NotEnabledPlaceholder } from "@/components/NotEnabledPlaceholder";
+import { PageHeader } from "@/components/ui/stat-card";
+import { Card, Alert } from "@/components/ui/primitives";
+import { Input } from "@/components/ui/input";
+import { Select } from "@/components/ui/select";
+import { Button } from "@/components/ui/button";
+import { LoadingBlock } from "@/components/StateBlocks";
+import { transporterApi, vehicleApi } from "@/services/transporterApi";
 
-export default function TransporterPage() {
-  return (
-    <RoleProtectedPage role="TRANSPORTER">
-      <NotEnabledPlaceholder />
-    </RoleProtectedPage>
-  );
-}
+function Content(){const qc=useQueryClient(); const profile=useQuery({queryKey:["transporter","profile"],queryFn:()=>transporterApi.me(),retry:false}); const vehicles=useQuery({queryKey:["transporter","vehicles"],queryFn:()=>vehicleApi.list()}); const areas=useQuery({queryKey:["transporter","areas"],queryFn:()=>transporterApi.serviceAreas(),retry:false}); const [reg,setReg]=React.useState(""); const [type,setType]=React.useState("PICKUP"); const [cap,setCap]=React.useState(""); const [area,setArea]=React.useState(""); const create=useMutation({mutationFn:()=>vehicleApi.register({registrationNumber:reg,vehicleType:type,capacityValue:Number(cap),capacityUnit:"KG"}),onSuccess:()=>{setReg("");setCap("");qc.invalidateQueries({queryKey:["transporter","vehicles"]})}}); const addArea=useMutation({mutationFn:()=>transporterApi.addServiceArea({areaType:"DISTRICT",state:area.split(",")[0]?.trim(),district:area.split(",")[1]?.trim()}),onSuccess:()=>{setArea("");qc.invalidateQueries({queryKey:["transporter","areas"]})}}); return <div><PageHeader title="Transport Network" description="Manage your transporter profile, vehicles, declared service areas and owner-controlled availability."/><div className="grid gap-6 lg:grid-cols-3"><Card className="lg:col-span-2"><div className="flex items-center gap-3"><span className="flex h-11 w-11 items-center justify-center rounded-2xl bg-accent/20"><Truck className="h-5 w-5"/></span><div><h2 className="font-semibold">Transporter profile</h2><p className="text-sm text-muted-foreground">Verification is controlled by the platform admin.</p></div></div>{profile.isLoading?<LoadingBlock/>:profile.isError?<Alert variant="info" className="mt-4">No transporter profile yet. Create it from the profile form below.</Alert>:<pre className="mt-4 overflow-auto rounded-2xl bg-secondary p-4 text-xs">{JSON.stringify(profile.data,null,2)}</pre>}<Button className="mt-4 w-auto" onClick={()=>profile.refetch()}>Refresh profile</Button></Card><Card><h2 className="mb-3 font-semibold">Service areas</h2>{areas.isLoading?<LoadingBlock/>:<pre className="max-h-44 overflow-auto rounded-xl bg-secondary p-3 text-xs">{JSON.stringify(areas.data,null,2)}</pre>}<Input className="mt-3" value={area} onChange={e=>setArea(e.target.value)} placeholder="State, District"/><Button className="mt-3" isLoading={addArea.isPending} disabled={!area.includes(",")} onClick={()=>addArea.mutate()}><MapPin className="h-4 w-4"/> Add district</Button></Card></div><Card className="mt-6"><div className="mb-4 flex items-center justify-between"><div><h2 className="font-semibold">Vehicle registry</h2><p className="text-sm text-muted-foreground">Register vehicles and keep availability accurate.</p></div><Plus className="h-5 w-5"/></div><div className="grid gap-3 sm:grid-cols-3"><Input value={reg} onChange={e=>setReg(e.target.value)} placeholder="Registration number"/><Select value={type} onChange={e=>setType(e.target.value)}><option>MINI_TRUCK</option><option>PICKUP</option><option>LIGHT_TRUCK</option><option>MEDIUM_TRUCK</option><option>HEAVY_TRUCK</option><option>TRACTOR_TROLLEY</option><option>REFRIGERATED_TRUCK</option><option>OTHER</option></Select><Input type="number" min="1" value={cap} onChange={e=>setCap(e.target.value)} placeholder="Capacity (KG)"/></div><Button className="mt-3 w-auto" disabled={!reg||!cap} isLoading={create.isPending} onClick={()=>create.mutate()}>Register vehicle</Button>{create.isError&&<Alert variant="error" className="mt-3">Vehicle registration failed. Check the registration number and capacity.</Alert>}<div className="mt-5">{vehicles.isLoading?<LoadingBlock/>:<pre className="max-h-80 overflow-auto rounded-2xl bg-[#242424] p-4 text-xs text-[#f8f4e9]">{JSON.stringify(vehicles.data,null,2)}</pre>}</div></Card></div>}
+export default function TransporterPage(){return <RoleProtectedPage role="TRANSPORTER"><Content/></RoleProtectedPage>}

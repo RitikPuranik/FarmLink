@@ -66,6 +66,13 @@ import { env } from "./config/env";
 import { MarketIntelligenceRepository } from "./modules/market-intelligence/market-intelligence.repository";
 import { MarketIntelligenceService } from "./modules/market-intelligence/market-intelligence.service";
 import { createMarketIntelligenceRouter } from "./modules/market-intelligence/market-intelligence.routes";
+import { PriceHistoryRepository } from "./modules/price-forecasting/price-history.repository";
+import { PriceHistoryPreparationService } from "./modules/price-forecasting/price-history-preparation.service";
+import { BaselineForecastEngine } from "./modules/price-forecasting/price-forecasting.engine";
+import { PriceForecastRepository } from "./modules/price-forecasting/price-forecasting.repository";
+import { PriceForecastGenerationService } from "./modules/price-forecasting/price-forecast-generation.service";
+import { PriceForecastingService } from "./modules/price-forecasting/price-forecasting.service";
+import { createPriceForecastingRouter } from "./modules/price-forecasting/price-forecasting.routes";
 import { BuyerMatchingService } from "./modules/buyer-matching/buyer-matching.service";
 import { createBuyerMatchingRouter } from "./modules/buyer-matching/buyer-matching.routes";
 import { PrismaWarehouseRepository } from "./modules/warehouse-intelligence/warehouse.repository";
@@ -289,6 +296,27 @@ export function createApp(deps: AppDependencies): Express {
     deps.auditService,
   );
 
+  // Module 7 — deterministic price forecasting. Reuses the Module 6
+  // market repository and the same Prisma client; the preparation layer
+  // handles bounded historical windows and data sufficiency, while the
+  // engine remains pure and deterministic.
+  const priceHistoryRepository = new PriceHistoryRepository(deps.prisma);
+  const priceHistoryPreparationService = new PriceHistoryPreparationService(priceHistoryRepository);
+  const baselineForecastEngine = new BaselineForecastEngine();
+  const priceForecastRepository = new PriceForecastRepository(deps.prisma);
+  const priceForecastGenerationService = new PriceForecastGenerationService(
+    priceHistoryPreparationService,
+    baselineForecastEngine,
+    priceForecastRepository,
+  );
+  const priceForecastingService = new PriceForecastingService(
+    priceForecastGenerationService,
+    priceForecastRepository,
+    marketIntelligenceRepository,
+    deps.prisma,
+    deps.auditService,
+  );
+
   // Module 9 Part 2 — Warehouse Intelligence. Same "thin wrapper over
   // deps.prisma, constructed inline" pattern as marketIntelligenceRepository
   // above rather than an AppDependencies field, since Part 1 established
@@ -398,6 +426,11 @@ export function createApp(deps: AppDependencies): Express {
   app.use(
     "/api/market-intelligence",
     createMarketIntelligenceRouter(marketIntelligenceService, deps.authRepository, deps.auditService),
+  );
+
+  app.use(
+    "/api/price-forecasting",
+    createPriceForecastingRouter(priceForecastingService, deps.authRepository, deps.auditService),
   );
   app.use("/api", createBuyerMatchingRouter(buyerMatchingService, deps.authRepository, deps.auditService));
   app.use(

@@ -54,7 +54,23 @@ export const forecastApi = {
   // wired into the running server — this call is here so the UI is ready
   // the moment it's mounted, and fails gracefully (visible "not available
   // yet" state) until then rather than being left out entirely.
-  async latestForCrop(cropId: string) {
-    return apiRequest<any>(`/api/price-forecasting/crops/${cropId}/latest`);
+  async latestForCrop(cropId: string, params?: { scopeType?: "MANDI" | "REGIONAL" | "CROP_WIDE"; mandiId?: string; state?: string; district?: string }) {
+    const q = new URLSearchParams();
+    if (params?.scopeType) q.set("scopeType", params.scopeType);
+    if (params?.mandiId) q.set("mandiId", params.mandiId);
+    if (params?.state) q.set("state", params.state);
+    if (params?.district) q.set("district", params.district);
+    const qs = q.toString();
+    return apiRequest<any>(`/api/price-forecasting/crops/${cropId}/latest${qs ? `?${qs}` : ""}`);
   },
+  async generate(input: { cropId: string; scope: { type: "MANDI"; mandiId: string } | { type: "REGIONAL"; state: string; district?: string } | { type: "CROP_WIDE" }; horizonDays?: number }) {
+    return apiRequest<any>("/api/price-forecasting/generate", { method: "POST", body: input });
+  },
+  async listForCrop(cropId: string, params?: { scopeType?: string; mandiId?: string; startDate?: string; endDate?: string; limit?: number }) {
+    const q = new URLSearchParams();
+    Object.entries(params ?? {}).forEach(([k,v]) => { if (v !== undefined && v !== "") q.set(k, String(v)); });
+    const qs = q.toString();
+    return apiRequest<any>(`/api/price-forecasting/crops/${cropId}${qs ? `?${qs}` : ""}`);
+  },
+  async get(publicId: string) { return apiRequest<any>(`/api/price-forecasting/${publicId}`); },
 };

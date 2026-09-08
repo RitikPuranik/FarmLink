@@ -40,6 +40,25 @@ export const fpoApi = {
   async analyticsOverview(fpoId: string) {
     return apiRequest<any>(`/api/fpos/${fpoId}/analytics/overview`);
   },
+  async aggregationMembers(fpoId: string, cropId: string) {
+    return apiRequest<any>(`/api/fpos/${fpoId}/crop-aggregation/${cropId}/members`);
+  },
+  async listAggregationGroups(fpoId: string, params?: { cropId?: string; status?: string }) {
+    const q = new URLSearchParams();
+    if (params?.cropId) q.set("cropId", params.cropId);
+    if (params?.status) q.set("status", params.status);
+    const qs = q.toString();
+    return apiRequest<any>(`/api/fpos/${fpoId}/aggregation-groups${qs ? `?${qs}` : ""}`);
+  },
+  async createAggregationGroup(fpoId: string, input: { cropId: string; targetQuantity?: number; unit: "KG" | "QTL" | "TONNE"; targetDate?: string }) {
+    return apiRequest<any>(`/api/fpos/${fpoId}/aggregation-groups`, { method: "POST", body: input });
+  },
+  async updateAggregationGroup(fpoId: string, aggregationId: string, input: Record<string, unknown>) {
+    return apiRequest<any>(`/api/fpos/${fpoId}/aggregation-groups/${aggregationId}`, { method: "PATCH", body: input });
+  },
+  async cancelAggregationGroup(fpoId: string, aggregationId: string) {
+    return apiRequest<any>(`/api/fpos/${fpoId}/aggregation-groups/${aggregationId}/cancel`, { method: "POST" });
+  },
 };
 
 export const membershipApi = {

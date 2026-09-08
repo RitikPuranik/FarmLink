@@ -37,6 +37,20 @@ export const warehouseApi = {
     return apiRequest<any>(`/api/warehouses/${warehouseId}/availability${qs ? `?${qs}` : ""}`);
   },
 
+  async suitability(warehouseId: string, cropId: string) {
+    return apiRequest<any>(`/api/warehouses/${warehouseId}/suitability?cropId=${encodeURIComponent(cropId)}`);
+  },
+  async storageEligibility(warehouseId: string, params: { cropId: string; quantity?: number; unit?: string }) {
+    const q=new URLSearchParams({ cropId: params.cropId });
+    if(params.quantity) q.set("quantity",String(params.quantity)); if(params.unit) q.set("unit",params.unit);
+    return apiRequest<any>(`/api/warehouses/${warehouseId}/storage-eligibility?${q.toString()}`);
+  },
+  async updateCapacity(warehouseId: string, storageUnitId: string, input: { totalCapacity?: number; availableCapacity?: number }) {
+    return apiRequest<any>(`/api/warehouses/${warehouseId}/storage-units/${storageUnitId}/capacity`, { method: "PATCH", body: input });
+  },
+  async updateConditions(warehouseId: string, storageUnitId: string, input: Record<string, unknown>) {
+    return apiRequest<any>(`/api/warehouses/${warehouseId}/storage-units/${storageUnitId}/conditions`, { method: "PATCH", body: input });
+  },
   async suitabilityAnalysis(warehouseId: string, params: { cropId: string; quantity?: number; unit?: string; durationDays?: number }) {
     const q = new URLSearchParams();
     q.set("cropId", params.cropId);

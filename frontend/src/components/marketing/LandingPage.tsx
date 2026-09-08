@@ -112,7 +112,7 @@ export default function LandingPage() {
   // =========================================================
 
   const mobileLinkClass =
-    'flex items-center justify-between rounded-xl px-4 py-3.5 text-sm font-bold uppercase tracking-wider text-white/75 transition-all duration-200 hover:bg-white/10 hover:text-[#e3b23c] active:scale-[0.98]'
+    'flex items-center justify-between rounded-xl px-4 py-3.5 text-sm font-bold uppercase tracking-wider text-white/75 transition-all duration-200 hover:bg-white/10 hover:text-[#d6b841] active:scale-[0.98]'
 
   return (
     <div
@@ -123,7 +123,7 @@ export default function LandingPage() {
         font-['Plus_Jakarta_Sans',sans-serif]
         text-[#f8f4e9]
         antialiased
-        selection:bg-[#e3b23c]
+        selection:bg-[#d6b841]
         selection:text-[#201f12]
       "
     >
@@ -156,7 +156,7 @@ export default function LandingPage() {
         .brand-sticker {
           font-family: 'Fredoka', cursive, sans-serif;
           font-weight: 700;
-          color: #1c1b12;
+          color: #242424;
           -webkit-text-stroke: var(--sticker-stroke) #f8f4e9;
           paint-order: stroke fill;
           stroke-linejoin: round;
@@ -168,7 +168,7 @@ export default function LandingPage() {
 
         .brand-script-yellow {
           font-family: 'Yellowtail', cursive;
-          color: #e3b23c;
+          color: #d6b841;
           -webkit-text-stroke: var(--script-stroke) #f8f4e9;
           paint-order: stroke fill;
           stroke-linejoin: round;
@@ -257,7 +257,7 @@ export default function LandingPage() {
                 backdrop-blur-md
                 transition-all
                 duration-300
-                group-hover:border-[#e3b23c]
+                group-hover:border-[#d6b841]
                 group-hover:bg-white/15
               "
             >
@@ -265,7 +265,7 @@ export default function LandingPage() {
                 className="
                   h-5
                   w-5
-                  text-[#e3b23c]
+                  text-[#d6b841]
                 "
               />
             </div>
@@ -278,7 +278,7 @@ export default function LandingPage() {
                 text-white
                 transition-colors
                 duration-300
-                group-hover:text-[#e3b23c]
+                group-hover:text-[#d6b841]
                 sm:text-xl
               "
             >
@@ -383,7 +383,7 @@ export default function LandingPage() {
                   h-1.5
                   w-1.5
                   rounded-full
-                  bg-[#e3b23c]
+                  bg-[#d6b841]
                 "
               />
 
@@ -424,11 +424,11 @@ export default function LandingPage() {
                   [&>button]:bg-white/10
                   [&>button]:text-white/80
 
-                  hover:[&>button]:border-[#e3b23c]/50
-                  hover:[&>button]:text-[#e3b23c]
+                  hover:[&>button]:border-[#d6b841]/50
+                  hover:[&>button]:text-[#d6b841]
 
                   [&>div[role=menu]]:border-white/10
-                  [&>div[role=menu]]:bg-[#1c1b12]/95
+                  [&>div[role=menu]]:bg-[#242424]/95
                   [&>div[role=menu]]:text-white/80
 
                   [&_p]:text-white/40
@@ -466,8 +466,8 @@ export default function LandingPage() {
                 backdrop-blur-md
                 transition-all
                 duration-300
-                hover:border-[#e3b23c]
-                hover:bg-[#e3b23c]
+                hover:border-[#d6b841]
+                hover:bg-[#d6b841]
                 hover:text-[#201f12]
                 active:scale-95
                 sm:text-sm
@@ -503,7 +503,7 @@ export default function LandingPage() {
                 backdrop-blur-md
                 transition-all
                 duration-300
-                hover:border-[#e3b23c]/50
+                hover:border-[#d6b841]/50
                 hover:text-white
                 active:scale-95
                 md:hidden
@@ -576,7 +576,7 @@ export default function LandingPage() {
                   text-[10px]
                   font-semibold
                   tracking-wide
-                  text-[#e3b23c]
+                  text-[#d6b841]
                 "
               >
                 Rooted in Farming. Built for the Future.
@@ -665,7 +665,7 @@ export default function LandingPage() {
                 items-center
                 justify-between
                 rounded-xl
-                bg-[#e3b23c]
+                bg-[#d6b841]
                 px-4
                 py-3.5
                 text-sm
@@ -795,7 +795,7 @@ export default function LandingPage() {
                 h-2
                 w-2
                 rounded-full
-                bg-[#e3b23c]
+                bg-[#d6b841]
               "
             />
 
@@ -993,7 +993,7 @@ export default function LandingPage() {
                 justify-center
                 gap-2
                 rounded-xl
-                bg-[#e3b23c]
+                bg-[#d6b841]
                 px-6
                 py-3.5
                 text-xs

@@ -27,7 +27,7 @@ function NavLink({ item, onClick }: { item: NavItem; onClick?: () => void }) {
       className={cn(
         "flex items-center gap-3 rounded-xl px-3.5 py-2.5 text-sm font-medium transition-colors",
         active
-          ? "bg-sidebar-active text-white"
+          ? "bg-accent text-[#242424]"
           : "text-sidebar-muted hover:bg-white/5 hover:text-white",
       )}
     >
@@ -186,7 +186,7 @@ function MobileTabLink({ item, Icon }: { item: NavItem; Icon: NavItem["icon"] })
       href={item.href}
       className={cn(
         "flex flex-1 flex-col items-center gap-0.5 py-2.5 text-[10px] font-medium",
-        active ? "text-primary" : "text-muted-foreground",
+        active ? "text-foreground" : "text-muted-foreground",
       )}
     >
       <Icon className="h-5 w-5" aria-hidden />

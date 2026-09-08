@@ -5,16 +5,16 @@
 @layer base {
   :root {
     /* Anndata palette — warm cream base, near-black (not green-black) dark
-       surfaces, a true olive green as the working brand color, and a warm
-       harvest-gold/yellow as the accent. No forest/dark-green hues. */
+       surfaces, a charcoal as the primary brand color and a warm
+       harvest-gold/yellow as the accent. No green hues. */
     --background: 42 38% 97%;
     --foreground: 40 12% 12%;
 
     --card: 0 0% 100%;
     --card-foreground: 40 12% 12%;
 
-    --primary: 78 34% 30%;
-    --primary-foreground: 42 45% 97%;
+    --primary: 24 9% 16%;
+    --primary-foreground: 42 38% 97%;
 
     --secondary: 44 45% 91%;
     --secondary-foreground: 40 12% 12%;
@@ -27,20 +27,20 @@
 
     --border: 40 14% 86%;
     --input: 40 14% 84%;
-    --ring: 78 34% 30%;
+    --ring: 24 9% 16%;
 
     --accent: 42 72% 54%;
     --accent-foreground: 40 25% 13%;
 
-    --success: 142 40% 30%;
+    --success: 28 72% 42%;
     --success-foreground: 0 0% 100%;
     --warning: 32 88% 48%;
     --warning-foreground: 0 0% 100%;
 
-    --sidebar-bg: 40 15% 9%;
-    --sidebar-foreground: 42 33% 96%;
-    --sidebar-muted: 40 8% 65%;
-    --sidebar-active: 42 55% 24%;
+    --sidebar-bg: 24 9% 10%;
+    --sidebar-foreground: 42 38% 97%;
+    --sidebar-muted: 40 7% 67%;
+    --sidebar-active: 42 72% 54%;
 
     --radius: 0.875rem;
   }

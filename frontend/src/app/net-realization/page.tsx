@@ -1,0 +1,16 @@
+"use client";
+import * as React from "react";
+import { useMutation, useQuery } from "@tanstack/react-query";
+import { ReceiptText } from "lucide-react";
+import { RoleProtectedPage } from "@/components/RoleProtectedPage";
+import { PageHeader } from "@/components/ui/stat-card";
+import { Card, Alert } from "@/components/ui/primitives";
+import { Select } from "@/components/ui/select";
+import { Input } from "@/components/ui/input";
+import { Button } from "@/components/ui/button";
+import { LoadingBlock } from "@/components/StateBlocks";
+import { lotApi } from "@/services/lotApi";
+import { netRealizationApi } from "@/services/netRealizationApi";
+
+function Content(){const lots=useQuery({queryKey:["lots","realization"],queryFn:()=>lotApi.listMine()}); const [id,setId]=React.useState(""); const [price,setPrice]=React.useState(""); const [qty,setQty]=React.useState(""); const calc=useMutation({mutationFn:()=>netRealizationApi.calculate(id,{salePricePerUnit:price?Number(price):undefined,salePriceUnit:"KG",saleQuantity:qty?Number(qty):undefined,saleQuantityUnit:"KG"})}); const hist=useQuery({queryKey:["realization","history",id],queryFn:()=>netRealizationApi.listForLot(id),enabled:!!id}); return <div><PageHeader title="Net Realization" description="See what remains after known costs and deductions. Missing inputs remain explicitly unavailable."/><Card className="mb-6"><div className="grid gap-4 sm:grid-cols-3"><div className="sm:col-span-1"><label className="mb-1.5 block text-sm font-medium">Lot</label><Select value={id} onChange={e=>setId(e.target.value)}><option value="">Select a lot</option>{(lots.data??[]).map(l=><option key={l.publicId??l.id} value={l.publicId??l.id}>{l.crop.name} · {l.quantity} {l.unit}</option>)}</Select></div><div><label className="mb-1.5 block text-sm font-medium">What-if sale price / KG</label><Input type="number" min="0" value={price} onChange={e=>setPrice(e.target.value)} placeholder="Optional"/></div><div><label className="mb-1.5 block text-sm font-medium">Sale quantity / KG</label><Input type="number" min="0" value={qty} onChange={e=>setQty(e.target.value)} placeholder="Optional"/></div></div><Button className="mt-4 w-auto" disabled={!id} isLoading={calc.isPending} onClick={()=>calc.mutate()}><ReceiptText className="h-4 w-4"/> Calculate</Button>{calc.isError&&<Alert variant="error" className="mt-4">Calculation could not be completed.</Alert>}</Card><div className="grid gap-6 lg:grid-cols-2"><Card><h2 className="mb-3 font-semibold">Calculation</h2>{calc.isPending?<LoadingBlock/>:calc.data?<pre className="max-h-[520px] overflow-auto rounded-2xl bg-[#242424] p-5 text-xs leading-5 text-[#f8f4e9]">{JSON.stringify(calc.data,null,2)}</pre>:<p className="text-sm text-muted-foreground">Enter a lot and optional what-if values.</p>}</Card><Card><h2 className="mb-3 font-semibold">Saved calculations</h2>{hist.isLoading?<LoadingBlock/>:hist.isError?<p className="text-sm text-muted-foreground">No saved calculations.</p>:<pre className="max-h-[520px] overflow-auto rounded-2xl bg-secondary p-4 text-xs">{JSON.stringify(hist.data,null,2)}</pre>}</Card></div></div>}
+export default function NetRealizationPage(){return <RoleProtectedPage role="FARMER"><Content/></RoleProtectedPage>}

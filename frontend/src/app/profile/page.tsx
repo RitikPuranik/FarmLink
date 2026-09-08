@@ -102,7 +102,7 @@ function SessionsCard() {
     <Card className="mt-6">
       <h2 className="mb-2 text-lg font-medium">Sessions</h2>
       <p className="mb-4 text-sm text-muted-foreground">
-        Log out of FarmLink on every device where you&rsquo;re currently signed in.
+        Log out of Anndata on every device where you&rsquo;re currently signed in.
       </p>
       {done && <Alert variant="success" className="mb-4">Logged out of all sessions.</Alert>}
       <Button variant="destructive" isLoading={loading} onClick={handleLogoutAll}>

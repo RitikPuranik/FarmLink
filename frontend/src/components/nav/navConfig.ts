@@ -36,8 +36,11 @@ export const NAV_BY_ROLE: Record<UserRole, NavItem[]> = {
     { href: "/lots", label: "My Lots", icon: Package },
     { href: "/quality", label: "Quality", icon: ShieldCheck },
     { href: "/market", label: "Market Prices", icon: LineChart },
+    { href: "/forecasts", label: "Price Forecast", icon: BarChart3 },
+    { href: "/sell-vs-store", label: "Sell vs Store", icon: Scale },
     { href: "/warehouses", label: "Warehouses", icon: Warehouse },
     { href: "/trade-offers", label: "Trade Offers", icon: Handshake },
+    { href: "/net-realization", label: "Net Realization", icon: ReceiptText },
     { href: "/fpo-membership", label: "My FPO", icon: Building2 },
     { href: "/profile", label: "Profile", icon: UserCircle },
   ],
@@ -59,12 +62,13 @@ export const NAV_BY_ROLE: Record<UserRole, NavItem[]> = {
     { href: "/admin/buyers", label: "Buyers", icon: ShieldAlert },
     { href: "/admin/warehouses", label: "Warehouses", icon: Warehouse },
     { href: "/admin/users", label: "Users", icon: Users },
+    { href: "/admin/transporters", label: "Transport Network", icon: Truck },
   ],
   GOVERNMENT_VIEWER: [
     { href: "/government", label: "FPO Insights", icon: Landmark },
   ],
-  TRANSPORTER: [{ href: "/transporter", label: "Dashboard", icon: Truck }],
-  WAREHOUSE_OPERATOR: [{ href: "/warehouse", label: "Dashboard", icon: Warehouse }],
+  TRANSPORTER: [{ href: "/transporter", label: "Transport Network", icon: Truck }, { href: "/trade-offers", label: "Offers", icon: Handshake }],
+  WAREHOUSE_OPERATOR: [{ href: "/warehouse", label: "Storage Operations", icon: Warehouse }],
 };
 
 export const ROLE_LABEL: Record<UserRole, string> = {
