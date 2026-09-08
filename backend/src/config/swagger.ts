@@ -20,7 +20,10 @@ const options: swaggerJsdoc.Options = {
         "**Module 8**: Sell vs Store Decision Engine (market/quality/storage context evaluation).\n\n" +
         "**Price Forecasting**: Deterministic baseline market price forecasting (weighted moving average + damped trend). " +
         "Never an LLM/ML model; forecasts are analytical estimates, not guarantees.\n\n" +
-        "Logistics, shipment, payment, and grievance are not yet part of this API.",
+        "**Module 15**: Transporter & Vehicle Network — a registry of transporter profiles, their vehicles, " +
+        "declared service areas, and a manually-set availability flag. Discovery/filtering only: no logistics " +
+        "pricing, route optimization, GPS tracking, shipment creation, or payment processing.\n\n" +
+        "Logistics quotes, shipment/GPS tracking, delivery reconciliation, and payment status tracking are not yet part of this API.",
     },
     servers: [{ url: env.BACKEND_URL, description: "Current environment" }],
     components: {

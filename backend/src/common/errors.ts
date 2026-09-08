@@ -80,6 +80,25 @@ export type ErrorCode =
   | "INVALID_SALE_PRICE"
   | "INVALID_COST_AMOUNT"
   | "OFFER_NOT_FOUND_FOR_LOT"
+  // Module 15 — Transporter & Vehicle Network. NOT_FOUND/CONFLICT-shaped
+  // codes below deliberately reuse the generic NotFoundError/ConflictError
+  // classes (same convention Module 14 uses for "lot not found") rather
+  // than a bespoke 404/409 subclass; the remaining codes are genuine
+  // business-rule violations thrown via TransporterDomainError.
+  | "TRANSPORTER_PROFILE_NOT_FOUND"
+  | "TRANSPORTER_PROFILE_ALREADY_EXISTS"
+  | "VEHICLE_NOT_FOUND"
+  | "VEHICLE_REGISTRATION_ALREADY_EXISTS"
+  | "SERVICE_AREA_NOT_FOUND"
+  | "SERVICE_AREA_ALREADY_EXISTS"
+  | "INVALID_VEHICLE_CAPACITY"
+  | "INVALID_VEHICLE_REGISTRATION"
+  | "INVALID_TRANSPORTER_STATUS_TRANSITION"
+  | "INVALID_VEHICLE_STATUS_TRANSITION"
+  | "INVALID_VERIFICATION_TRANSITION"
+  | "INVALID_SERVICE_AREA"
+  | "TRANSPORTER_NOT_VERIFIED"
+  | "UNAUTHORIZED_TRANSPORTER_ACCESS"
   | "UNEXPECTED_ERROR";
 
 export class AppError extends Error {
@@ -214,6 +233,37 @@ export class NetRealizationDomainError extends AppError {
     code: Extract<
       ErrorCode,
       "INVALID_SALE_PRICE" | "INVALID_QUANTITY" | "INVALID_COST_AMOUNT" | "UNSUPPORTED_UNIT" | "OFFER_NOT_FOUND_FOR_LOT"
+    >,
+    statusCode = 422,
+  ) {
+    super(message, statusCode, code);
+  }
+}
+
+/**
+ * Module 15's equivalent of WarehouseDomainError/NetRealizationDomainError.
+ * TRANSPORTER_PROFILE_NOT_FOUND, VEHICLE_NOT_FOUND, and SERVICE_AREA_NOT_FOUND
+ * are NOT included here — those are thrown via the generic NotFoundError
+ * (same convention Module 14 uses), and the two ALREADY_EXISTS codes via the
+ * generic ConflictError. This class is for the remaining genuine
+ * business-rule violations: invalid capacity/registration input, invalid
+ * status/verification transitions, an invalid service area combination,
+ * an unverified transporter attempting a gated action, or an access
+ * attempt against another transporter's resource.
+ */
+export class TransporterDomainError extends AppError {
+  constructor(
+    message: string,
+    code: Extract<
+      ErrorCode,
+      | "INVALID_VEHICLE_CAPACITY"
+      | "INVALID_VEHICLE_REGISTRATION"
+      | "INVALID_TRANSPORTER_STATUS_TRANSITION"
+      | "INVALID_VEHICLE_STATUS_TRANSITION"
+      | "INVALID_VERIFICATION_TRANSITION"
+      | "INVALID_SERVICE_AREA"
+      | "TRANSPORTER_NOT_VERIFIED"
+      | "UNAUTHORIZED_TRANSPORTER_ACCESS"
     >,
     statusCode = 422,
   ) {

@@ -96,6 +96,15 @@ import { NetRealizationInputResolverService } from "./modules/net-realization/ne
 import { NetRealizationCalculatorService } from "./modules/net-realization/net-realization-calculator.service";
 import { NetRealizationOrchestrationService } from "./modules/net-realization/net-realization-orchestration.service";
 import { createNetRealizationRouter } from "./modules/net-realization/net-realization.routes";
+import { PrismaTransporterRepository } from "./modules/transporters/transporter.repository";
+import { PrismaTransporterServiceAreaRepository } from "./modules/transporters/transporter-service-area.repository";
+import { PrismaVehicleRepository } from "./modules/transporters/vehicle.repository";
+import { TransporterAuthorizationService } from "./modules/transporters/transporter.authorization";
+import { TransporterService } from "./modules/transporters/transporter.service";
+import { VehicleService } from "./modules/transporters/vehicle.service";
+import { createTransporterRouter } from "./modules/transporters/transporter.routes";
+import { createVehicleRouter } from "./modules/transporters/vehicle.routes";
+import { createAdminTransporterRouter } from "./modules/transporters/admin-transporter.routes";
 
 export interface AppDependencies {
   authRepository: AuthRepository;
@@ -502,6 +511,30 @@ export function createApp(deps: AppDependencies): Express {
       deps.authRepository,
       deps.auditService
     )
+  );
+
+  // Module 15 — Transporter & Vehicle Network. A pure registry layer:
+  // profiles, vehicles, service areas, availability, verification.
+  // No logistics-quote, shipment, or tracking construction happens here —
+  // that is Module 16/17's job (see docs/modules/module-15-transporter-vehicle-network.md).
+  const transporterRepository = new PrismaTransporterRepository(deps.prisma);
+  const transporterServiceAreaRepository = new PrismaTransporterServiceAreaRepository(deps.prisma);
+  const vehicleRepository = new PrismaVehicleRepository(deps.prisma);
+  const transporterAuthorizationService = new TransporterAuthorizationService(transporterRepository);
+  const transporterService = new TransporterService(
+    transporterRepository,
+    transporterServiceAreaRepository,
+    vehicleRepository,
+    transporterAuthorizationService,
+    deps.auditService
+  );
+  const vehicleService = new VehicleService(vehicleRepository, transporterAuthorizationService, deps.auditService);
+
+  app.use("/api", createTransporterRouter(transporterService, deps.authRepository, deps.auditService));
+  app.use("/api", createVehicleRouter(vehicleService, deps.authRepository, deps.auditService));
+  app.use(
+    "/api/admin",
+    createAdminTransporterRouter(transporterService, vehicleService, deps.authRepository, deps.auditService)
   );
 
   app.use(notFoundHandler);

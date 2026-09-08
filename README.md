@@ -4,7 +4,7 @@
 
 FarmLink is a modular backend platform built with **Express, TypeScript, Prisma, and PostgreSQL**. The project is being developed incrementally so each module reuses the authorization, audit, domain models, and service boundaries established by earlier modules.
 
-> **Current implementation status:** Modules **1–13 are implemented**. Module **14 (Net Realization Calculator)** is the next major planned module.
+> **Current implementation status:** Modules **1–15 are implemented**. Module **16 (Logistics Quote & Optimization)** is the next major planned module.
 
 ## Implemented Modules
 
@@ -23,9 +23,9 @@ FarmLink is a modular backend platform built with **Express, TypeScript, Prisma,
 | 11 | Buyer Demand | ✅ Complete |
 | 12 | Farmer-Buyer Matching | ✅ Complete |
 | 13 | RFQ / Offers / Negotiation | ✅ Complete |
-| 14 | Net Realization Calculator | ⏳ Next |
-| 15 | Transporter & Vehicle Network | ❌ Planned |
-| 16 | Logistics Quote & Optimization | ❌ Planned |
+| 14 | Net Realization Calculator | ✅ Complete |
+| 15 | Transporter & Vehicle Network | ✅ Complete — registry only (see docs/modules/module-15-transporter-vehicle-network.md); no quotes/pricing/tracking |
+| 16 | Logistics Quote & Optimization | ⏳ Next |
 | 17 | Shipment & GPS Tracking | ❌ Planned |
 | 18 | Delivery & Quality Reconciliation | ❌ Planned |
 | 19 | Payment Status Tracking | ❌ Planned |
@@ -348,27 +348,36 @@ Dispute Resolution
 
 ---
 
-# Next Module
-
 ## Module 14 — Net Realization Calculator
 
-This is the next planned major module.
+Deterministic (no AI/ML) calculation of a farmer's expected realization
+after accounting for available costs and deductions. Unknown costs stay
+explicitly unavailable rather than fabricated. See
+`docs/modules/module-14-net-realization.md`.
 
-It will provide a transparent calculation of the farmer's expected realization after accounting for available costs and deductions.
+## Module 15 — Transporter & Vehicle Network
 
-Conceptually:
+A registry of transporter profiles, the vehicles they operate, declared
+service areas, and a manually-set availability flag — the foundation
+Module 16 (Logistics Quote & Optimization) will build on. Discovery is
+pure filtering, never ranking or price computation; no rate, distance,
+ETA, GPS coordinate, or route is stored anywhere in this module. See
+`docs/modules/module-15-transporter-vehicle-network.md`.
 
-```text
-Gross Sale Value
-− Storage Cost
-− Transport Cost
-− Platform / Handling Charges
-− Other Applicable Costs
-────────────────────────────
-= Estimated Net Realization
+```
+Transporter Profile → Vehicle Registry → Service Areas → Availability → Verification → Discovery
 ```
 
-Unknown costs should remain explicitly unavailable rather than fabricated.
+---
+
+# Next Module
+
+## Module 16 — Logistics Quote & Optimization
+
+This is the next planned major module. Given a registered lot and a
+delivery requirement, it will determine which of Module 15's verified,
+available transporters can provide a quote — the quote/pricing/routing
+logic itself does not exist yet.
 
 ---
 

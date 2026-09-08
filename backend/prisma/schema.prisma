@@ -268,6 +268,11 @@ model User {
   // calculation down with them).
   netRealizationCalculations NetRealizationCalculation[]
 
+  // Module 15 — a TRANSPORTER gets at most one TransporterProfile (same
+  // one-to-one shape as farmerProfile/buyerProfile above). No other
+  // Module 1 field/relation changes.
+  transporterProfile TransporterProfile?
+
   @@index([mobile])
   @@index([email])
   @@index([publicId])
@@ -2362,4 +2367,217 @@ model NetRealizationCalculation {
   @@index([requestedByUserId])
   @@index([status])
   @@map("net_realization_calculations")
+}
+
+// ---------------------------------------------------------------------------
+// Module 15 — Transporter & Vehicle Network
+//
+// This is a *registry* layer only: transporter profiles, the vehicles they
+// operate, declared service areas, a manually-set availability flag, and an
+// administrative verification workflow. It deliberately stores nothing that
+// would belong to Module 16 (Logistics Quote & Optimization), Module 17
+// (Shipment & GPS Tracking), Module 18 (Delivery & Quality Reconciliation),
+// or Module 19 (Payment Status Tracking) — no rates, distances, ETAs, GPS
+// coordinates, or route data. See docs/modules/module-15-transporter-vehicle-network.md.
+// ---------------------------------------------------------------------------
+
+enum TransporterVerificationStatus {
+  PENDING
+  VERIFIED
+  REJECTED
+  SUSPENDED
+}
+
+enum VehicleType {
+  MINI_TRUCK
+  PICKUP
+  LIGHT_TRUCK
+  MEDIUM_TRUCK
+  HEAVY_TRUCK
+  TRACTOR_TROLLEY
+  REFRIGERATED_TRUCK
+  OTHER
+}
+
+enum VehicleStatus {
+  ACTIVE
+  INACTIVE
+  MAINTENANCE
+  SUSPENDED
+}
+
+enum VehicleVerificationStatus {
+  PENDING
+  VERIFIED
+  REJECTED
+}
+
+// AVAILABLE/UNAVAILABLE are the only values ever set by a transporter today
+// (Part G). RESERVED/IN_TRANSIT exist so the column and index are already
+// in place for Module 16/17 to set programmatically later — nothing in
+// this module ever writes those two values.
+enum VehicleAvailabilityStatus {
+  AVAILABLE
+  UNAVAILABLE
+  RESERVED
+  IN_TRANSIT
+}
+
+enum ServiceAreaType {
+  STATE
+  DISTRICT
+  CITY
+  PINCODE
+}
+
+// Controlled, queryable capability list (Part D — deliberately not
+// free-text). "Refrigerated" is intentionally NOT in this enum: it is
+// already its own indexed boolean (Vehicle.isRefrigerated) since it is by
+// far the most common discovery filter (Part N); this enum covers the
+// remaining, less-frequently-filtered capabilities.
+enum VehicleCapability {
+  COVERED
+  OPEN_BODY
+  TEMPERATURE_CONTROLLED
+  BULK_TRANSPORT
+  SMALL_LOAD_SUITABLE
+  LARGE_LOAD_SUITABLE
+}
+
+// One transporter profile per user (Part A). Verification here means
+// "verified per FarmLink's own administrative workflow" — never a claim of
+// government/RTO verification (Part J's documentation rule applies equally
+// here).
+model TransporterProfile {
+  id       String @id @default(uuid())
+  publicId String @unique @default(uuid())
+
+  userId String @unique
+
+  businessName String?
+  contactName  String?
+  contactPhone String?
+  contactEmail String?
+
+  verificationStatus TransporterVerificationStatus @default(PENDING)
+  phoneVerified      Boolean                        @default(false)
+  isActive           Boolean                        @default(true)
+
+  // Free-form, non-queried extra fields (Part A's conceptual model) — never
+  // used for authorization or discovery filtering.
+  metadata Json?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  user         User                      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  vehicles     Vehicle[]
+  serviceAreas TransporterServiceArea[]
+
+  @@index([verificationStatus])
+  @@index([isActive])
+  @@map("transporter_profiles")
+}
+
+// A vehicle belongs to exactly one transporter (Part 3 — no fleet-sharing
+// in this module). Capacity is stored the same way CropLot/Warehouse
+// quantities are (Part E, reusing modules/fpo/unit-conversion.ts): the
+// unit the transporter declared, plus a canonical KG value so
+// minimumCapacity discovery filtering (Part N) is a single indexed
+// comparison rather than a per-row unit conversion.
+model Vehicle {
+  id       String @id @default(uuid())
+  publicId String @unique @default(uuid())
+
+  transporterId String
+
+  // registrationNumber is exactly as entered (for display); uniqueness is
+  // enforced on normalizedRegistrationNumber instead so "MH12AB1234" and
+  // "mh-12-ab-1234" cannot both be registered (Part M).
+  registrationNumber           String
+  normalizedRegistrationNumber String @unique
+
+  vehicleType VehicleType
+
+  capacityUnit QuantityUnit @default(KG)
+  capacityKg   Decimal      @db.Decimal(12, 2)
+
+  capabilities   VehicleCapability[] @default([])
+  isRefrigerated Boolean             @default(false)
+
+  status             VehicleStatus              @default(ACTIVE)
+  verificationStatus VehicleVerificationStatus  @default(PENDING)
+
+  // Never defaults to AVAILABLE — availability is only ever true because a
+  // transporter explicitly said so (Part 2: never fabricate availability).
+  availabilityStatus    VehicleAvailabilityStatus @default(UNAVAILABLE)
+  availabilityUpdatedAt DateTime?
+
+  metadata Json?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  transporter TransporterProfile @relation(fields: [transporterId], references: [id], onDelete: Cascade)
+  driver      VehicleDriver?
+
+  @@index([transporterId])
+  @@index([vehicleType])
+  @@index([status])
+  @@index([verificationStatus])
+  @@index([availabilityStatus])
+  @@index([capacityKg])
+  @@map("vehicles")
+}
+
+// Administrative/geographic service areas (Part F) — never a route or a
+// GPS radius. Uniqueness is enforced by the service layer (nullable
+// columns make a DB-level composite unique unreliable across the four
+// area types), but this index keeps the common per-transporter lookup and
+// state/district filters (Part N discovery) efficient.
+model TransporterServiceArea {
+  id String @id @default(uuid())
+
+  transporterId String
+
+  areaType ServiceAreaType
+
+  state    String?
+  district String?
+  city     String?
+  pincode  String?
+
+  createdAt DateTime @default(now())
+
+  transporter TransporterProfile @relation(fields: [transporterId], references: [id], onDelete: Cascade)
+
+  @@index([transporterId])
+  @@index([state])
+  @@index([district])
+  @@map("transporter_service_areas")
+}
+
+// Deliberately minimal (Part H): a vehicle may optionally have one
+// assigned driver record. No driver authentication, no driver-facing API
+// in this module — this is schema-only foundation for later modules.
+// phone/licenseNumber are PII and are never returned by any public or
+// discovery DTO (Part S).
+model VehicleDriver {
+  id String @id @default(uuid())
+
+  vehicleId     String @unique
+  transporterId String
+
+  name          String
+  phone         String?
+  licenseNumber String?
+  isActive      Boolean @default(true)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  vehicle Vehicle @relation(fields: [vehicleId], references: [id], onDelete: Cascade)
+
+  @@index([transporterId])
+  @@map("vehicle_drivers")
 }

@@ -107,6 +107,16 @@ const ALLOWED_EVENTS = new Set([
   "warehouse_provider_failed",
   "warehouse_record_normalization_failed",
   "warehouse_record_validation_failed",
+  // Module 15 — Transporter & Vehicle Network. Never includes the vehicle's
+  // registration number, driver phone/license, or precise coordinates —
+  // service area events only ever carry the area type, never the raw
+  // state/district/city/pincode strings.
+  "transporter_profile_created",
+  "transporter_verified",
+  "transporter_suspended",
+  "vehicle_registered",
+  "vehicle_availability_updated",
+  "vehicle_verified",
 ]);
 
 // Defense in depth: even if a caller accidentally passes a sensitive key in
@@ -126,6 +136,12 @@ const BLOCKED_PROPERTY_KEYS = new Set([
   "longitude",
   "pincode",
   "village",
+  // Module 15 defense-in-depth (mirrors the module's own trackEvent()
+  // call sites, which never pass these, but a future caller must not be
+  // able to leak them by accident either).
+  "phone",
+  "licenseNumber",
+  "registrationNumber",
 ]);
 
 export function trackEvent(
