@@ -25,6 +25,18 @@ export interface RegisterVehicleInput {
   isRefrigerated?: boolean;
 }
 
+/** Part 11 — bulk onboarding. Deliberately all-or-nothing (no partial
+ * processing): every item is validated and checked for duplicates before
+ * anything is written, then persisted in a single transaction. This
+ * trades "report per-item success/failure for a partially-applied batch"
+ * for "never leave an inconsistent fleet behind," per the instruction to
+ * not compromise correctness for the sake of a convenience endpoint. */
+export interface BulkRegisterVehicleItem extends RegisterVehicleInput {}
+
+export interface BulkRegisterVehiclesInput {
+  vehicles: BulkRegisterVehicleItem[];
+}
+
 export interface UpdateVehicleInput {
   vehicleType?: VehicleType;
   capacityValue?: number;
@@ -141,6 +153,95 @@ export class VehicleService {
     trackEvent("vehicle_registered", user.id, { vehicleType: vehicle.vehicleType });
 
     return toVehiclePublicDTO(vehicle);
+  }
+
+  async registerVehicleBulk(
+    user: AuthenticatedUserContext,
+    input: BulkRegisterVehiclesInput,
+    meta: RequestMeta,
+  ): Promise<VehiclePublicDTO[]> {
+    const profile = await this.authorization.resolveOwnProfile(user);
+
+    // Validate + normalize every item up front. Nothing is written to the
+    // database until every single item in the batch has passed shape
+    // validation (registration number, capacity) — an all-or-nothing
+    // batch is only meaningful if we reject bad input before touching
+    // the DB, not partway through.
+    const normalizedItems = input.vehicles.map((item, index) => {
+      const { valid, normalized, reason } = validateRegistrationNumber(item.registrationNumber);
+      if (!valid) {
+        throw new TransporterDomainError(
+          `Vehicle at index ${index}: ${reason ?? "invalid registration number."}`,
+          "INVALID_VEHICLE_REGISTRATION",
+        );
+      }
+      const capacityKg = validateAndNormalizeCapacity({ value: item.capacityValue, unit: item.capacityUnit });
+      return { index, item, normalized, capacityKg };
+    });
+
+    // Reject duplicate normalized registration numbers within the batch
+    // itself (e.g. the same plate typed twice with different casing) —
+    // the DB unique constraint would only catch this as an opaque
+    // mid-transaction failure otherwise.
+    const seen = new Map<string, number>();
+    for (const { index, normalized } of normalizedItems) {
+      const firstIndex = seen.get(normalized);
+      if (firstIndex !== undefined) {
+        throw new ConflictError(
+          `Vehicles at index ${firstIndex} and ${index} have the same registration number.`,
+        );
+      }
+      seen.set(normalized, index);
+    }
+
+    // Reject if any normalized plate is already registered to any
+    // transporter — checked in one query rather than one-per-item.
+    const normalizedValues = normalizedItems.map((n) => n.normalized);
+    const existing = await this.vehicles.findByNormalizedRegistrationNumbers(normalizedValues);
+    if (existing.length > 0) {
+      const takenSet = new Set(existing.map((v) => v.normalizedRegistrationNumber));
+      const conflicts = normalizedItems.filter((n) => takenSet.has(n.normalized)).map((n) => n.index);
+      throw new ConflictError(
+        `Vehicle(s) at index ${conflicts.join(", ")} have a registration number already registered.`,
+      );
+    }
+
+    let vehicles: VehicleRecord[];
+    try {
+      vehicles = await this.vehicles.createMany(
+        normalizedItems.map(({ item, normalized, capacityKg }) => ({
+          transporterId: profile.id,
+          registrationNumber: item.registrationNumber.trim(),
+          normalizedRegistrationNumber: normalized,
+          vehicleType: item.vehicleType,
+          capacityUnit: item.capacityUnit,
+          capacityKg,
+          capabilities: item.capabilities ?? [],
+          isRefrigerated: item.isRefrigerated ?? false,
+        })),
+      );
+    } catch (err) {
+      // Race-condition fallback: another request registered one of these
+      // plates between our pre-check above and the transaction — the
+      // transaction rolls back atomically (createMany), so no partial
+      // fleet is left behind; surface it as a normal conflict.
+      if (typeof err === "object" && err !== null && "code" in err && (err as { code?: string }).code === "P2002") {
+        throw new ConflictError("One or more vehicles in this batch are already registered.");
+      }
+      throw err;
+    }
+
+    await this.audit.record({
+      actorUserId: user.id,
+      action: "VEHICLE_BULK_REGISTERED",
+      entityType: "Vehicle",
+      entityId: profile.id,
+      metadata: { count: vehicles.length },
+      ...meta,
+    });
+    trackEvent("vehicle_registered", user.id, { bulk: true, count: vehicles.length });
+
+    return vehicles.map(toVehiclePublicDTO);
   }
 
   async getVehicle(user: AuthenticatedUserContext, publicId: string): Promise<VehiclePublicDTO> {

@@ -1,4 +1,4 @@
-import { ServiceAreaType, TransporterVerificationStatus } from "@prisma/client";
+import { ServiceAreaType, TransportProviderType, TransporterVerificationStatus } from "@prisma/client";
 import { ConflictError, NotFoundError, TransporterDomainError } from "../../common/errors";
 import { trackEvent } from "../../config/posthog";
 import { AuditService } from "../audit/audit.service";
@@ -17,7 +17,13 @@ import {
 import { VehicleRepository } from "./vehicle.repository";
 
 export interface CreateTransporterProfileInput {
+  /** What kind of transport provider this is (individual owner-operator
+   * through to a logistics company managing a large fleet). Defaults to
+   * INDIVIDUAL when omitted — every provider type uses the exact same
+   * TransporterProfile -> Vehicle[] relationship underneath. */
+  providerType?: TransportProviderType;
   businessName?: string;
+  legalName?: string;
   contactName?: string;
   contactPhone?: string;
   contactEmail?: string;
@@ -38,6 +44,7 @@ export interface ListTransportersQuery {
   limit: number;
   state?: string;
   district?: string;
+  providerType?: TransportProviderType;
   vehicleType?: import("@prisma/client").VehicleType;
   minimumCapacityKg?: number;
   refrigerated?: boolean;
@@ -104,7 +111,9 @@ export class TransporterService {
 
     const profile = await this.transporters.create({
       userId: user.id,
+      providerType: input.providerType ?? "INDIVIDUAL",
       businessName: input.businessName ?? null,
+      legalName: input.legalName ?? null,
       contactName: input.contactName ?? null,
       contactPhone: input.contactPhone ?? null,
       contactEmail: input.contactEmail ?? null,
@@ -142,7 +151,9 @@ export class TransporterService {
     const profile = await this.authorization.resolveOwnProfile(user);
 
     const updated = await this.transporters.updateProfile(profile.id, {
+      ...(input.providerType !== undefined ? { providerType: input.providerType } : {}),
       ...(input.businessName !== undefined ? { businessName: input.businessName } : {}),
+      ...(input.legalName !== undefined ? { legalName: input.legalName } : {}),
       ...(input.contactName !== undefined ? { contactName: input.contactName } : {}),
       ...(input.contactPhone !== undefined ? { contactPhone: input.contactPhone } : {}),
       ...(input.contactEmail !== undefined ? { contactEmail: input.contactEmail } : {}),
@@ -192,6 +203,7 @@ export class TransporterService {
     const filters: TransporterSearchFilters = {
       state: query.state,
       district: query.district,
+      providerType: query.providerType,
       isActive: true,
       verificationStatus: query.verified ? "VERIFIED" : undefined,
       transporterIds,

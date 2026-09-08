@@ -90,9 +90,11 @@ describe("Transporter & Vehicle Network Routes Integration", () => {
     };
     mockVehiclesRepo = {
       create: jest.fn(),
+      createMany: jest.fn(),
       findById: jest.fn(),
       findByPublicId: jest.fn(),
       findByNormalizedRegistrationNumber: jest.fn(),
+      findByNormalizedRegistrationNumbers: jest.fn().mockResolvedValue([]),
       listByTransporter: jest.fn(),
       discover: jest.fn().mockResolvedValue([]),
       update: jest.fn(),
@@ -241,6 +243,56 @@ describe("Transporter & Vehicle Network Routes Integration", () => {
         .send({ registrationNumber: "MH12AB1234", vehicleType: "MEDIUM_TRUCK", capacityValue: 5000, capacityUnit: "KG" });
 
       expect(res.status).toBe(403);
+    });
+  });
+
+  describe("POST /api/vehicles/bulk (Step 11 — fleet onboarding)", () => {
+    it("registers a company's whole batch of trucks in one request", async () => {
+      mockTransporters.findByUserId.mockResolvedValue(makeProfile({ businessName: "ABC Logistics" }));
+      mockVehiclesRepo.createMany.mockResolvedValue([
+        makeVehicle({ id: "v1", publicId: "aaaaaaaa-1111-1111-1111-111111111111", registrationNumber: "MH12AB1234", normalizedRegistrationNumber: "MH12AB1234" }),
+        makeVehicle({ id: "v2", publicId: "bbbbbbbb-2222-2222-2222-222222222222", registrationNumber: "MH12CD5678", normalizedRegistrationNumber: "MH12CD5678" }),
+      ]);
+
+      const res = await request(app)
+        .post("/api/vehicles/bulk")
+        .set("Authorization", authHeader)
+        .send({
+          vehicles: [
+            { registrationNumber: "MH12AB1234", vehicleType: "MEDIUM_TRUCK", capacityValue: 5000, capacityUnit: "KG" },
+            { registrationNumber: "MH12CD5678", vehicleType: "MINI_TRUCK", capacityValue: 1000, capacityUnit: "KG" },
+          ],
+        });
+
+      expect(res.status).toBe(201);
+      expect(res.body.data.count).toBe(2);
+      expect(res.body.data.vehicles).toHaveLength(2);
+    });
+
+    it("rejects the whole batch with 409 when a plate repeats within it", async () => {
+      mockTransporters.findByUserId.mockResolvedValue(makeProfile());
+
+      const res = await request(app)
+        .post("/api/vehicles/bulk")
+        .set("Authorization", authHeader)
+        .send({
+          vehicles: [
+            { registrationNumber: "MH12AB1234", vehicleType: "MEDIUM_TRUCK", capacityValue: 5000, capacityUnit: "KG" },
+            { registrationNumber: "mh-12-ab-1234", vehicleType: "MINI_TRUCK", capacityValue: 1000, capacityUnit: "KG" },
+          ],
+        });
+
+      expect(res.status).toBe(409);
+      expect(mockVehiclesRepo.createMany).not.toHaveBeenCalled();
+    });
+
+    it("rejects an empty batch with 400 (schema-level validation)", async () => {
+      const res = await request(app)
+        .post("/api/vehicles/bulk")
+        .set("Authorization", authHeader)
+        .send({ vehicles: [] });
+
+      expect(res.status).toBe(400);
     });
   });
 

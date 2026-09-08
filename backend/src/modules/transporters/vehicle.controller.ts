@@ -1,7 +1,7 @@
 import { Request, Response } from "express";
 import { sendSuccess } from "../../common/apiResponse";
 import { AuthenticatedUserContext, RequestMeta } from "../auth/auth.types";
-import { RegisterVehicleInput, UpdateVehicleInput, VehicleService } from "./vehicle.service";
+import { BulkRegisterVehiclesInput, RegisterVehicleInput, UpdateVehicleInput, VehicleService } from "./vehicle.service";
 
 function requestMeta(req: Request): RequestMeta {
   return { ipAddress: req.ip, userAgent: req.get("user-agent") };
@@ -16,6 +16,14 @@ export class VehicleController {
 
     const vehicle = await this.vehicles.registerVehicle(user, input, requestMeta(req));
     sendSuccess(res, vehicle, "Vehicle registered successfully", 201);
+  };
+
+  registerVehiclesBulk = async (req: Request, res: Response) => {
+    const user = req.user as AuthenticatedUserContext;
+    const input = req.body as BulkRegisterVehiclesInput;
+
+    const vehicles = await this.vehicles.registerVehicleBulk(user, input, requestMeta(req));
+    sendSuccess(res, { vehicles, count: vehicles.length }, "Vehicles registered successfully", 201);
   };
 
   getVehicle = async (req: Request, res: Response) => {

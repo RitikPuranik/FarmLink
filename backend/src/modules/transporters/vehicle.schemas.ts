@@ -36,6 +36,26 @@ export const registerVehicleBody = z
   })
   .strict();
 
+/** Part 11 — bulk onboarding. Capped at 50 per request: large enough for
+ * a realistic fleet-onboarding batch, small enough to keep the all-or-
+ * nothing transaction (see VehicleRepository.createMany) bounded. */
+const bulkVehicleItem = z
+  .object({
+    registrationNumber: z.string().trim().min(1).max(20),
+    vehicleType,
+    capacityValue: z.coerce.number().finite("Capacity must be a finite number.").positive("Capacity must be greater than zero."),
+    capacityUnit: quantityUnit.default("KG"),
+    capabilities: z.array(vehicleCapability).max(10).optional(),
+    isRefrigerated: z.boolean().optional(),
+  })
+  .strict();
+
+export const bulkRegisterVehiclesBody = z
+  .object({
+    vehicles: z.array(bulkVehicleItem).min(1, "At least one vehicle is required.").max(50, "A batch cannot exceed 50 vehicles."),
+  })
+  .strict();
+
 export const updateVehicleBody = z
   .object({
     vehicleType: vehicleType.optional(),

@@ -49,9 +49,11 @@ describe("VehicleService", () => {
   beforeEach(() => {
     vehicles = {
       create: jest.fn(),
+      createMany: jest.fn(),
       findById: jest.fn(),
       findByPublicId: jest.fn(),
       findByNormalizedRegistrationNumber: jest.fn(),
+      findByNormalizedRegistrationNumbers: jest.fn(),
       listByTransporter: jest.fn(),
       discover: jest.fn(),
       update: jest.fn(),
@@ -70,6 +72,7 @@ describe("VehicleService", () => {
     service = new VehicleService(vehicles, authorization, audit as any);
 
     transporters.findByUserId.mockResolvedValue(makeProfile());
+    vehicles.findByNormalizedRegistrationNumbers.mockResolvedValue([]);
   });
 
   describe("registerVehicle", () => {
@@ -138,6 +141,75 @@ describe("VehicleService", () => {
           meta,
         ),
       ).rejects.toThrow(ConflictError);
+    });
+  });
+
+  describe("registerVehicleBulk (Step 11 — bulk onboarding)", () => {
+    const items = [
+      { registrationNumber: "MH12AB1234", vehicleType: "MEDIUM_TRUCK" as const, capacityValue: 5000, capacityUnit: "KG" as const },
+      { registrationNumber: "MH12CD5678", vehicleType: "MINI_TRUCK" as const, capacityValue: 1000, capacityUnit: "KG" as const },
+      { registrationNumber: "MH12EF9999", vehicleType: "REFRIGERATED_TRUCK" as const, capacityValue: 8000, capacityUnit: "KG" as const, isRefrigerated: true },
+    ];
+
+    it("registers every vehicle in the batch for the caller's own transporter, in one transaction", async () => {
+      vehicles.createMany.mockResolvedValue([
+        makeVehicle({ id: "v1", publicId: "pub-v1", registrationNumber: "MH12AB1234", normalizedRegistrationNumber: "MH12AB1234" }),
+        makeVehicle({ id: "v2", publicId: "pub-v2", registrationNumber: "MH12CD5678", normalizedRegistrationNumber: "MH12CD5678" }),
+        makeVehicle({ id: "v3", publicId: "pub-v3", registrationNumber: "MH12EF9999", normalizedRegistrationNumber: "MH12EF9999", isRefrigerated: true }),
+      ]);
+
+      const result = await service.registerVehicleBulk(transporterUser, { vehicles: items }, meta);
+
+      expect(result).toHaveLength(3);
+      expect(vehicles.createMany).toHaveBeenCalledWith(
+        expect.arrayContaining([
+          expect.objectContaining({ transporterId: "transporter-1", normalizedRegistrationNumber: "MH12AB1234" }),
+          expect.objectContaining({ transporterId: "transporter-1", normalizedRegistrationNumber: "MH12CD5678" }),
+          expect.objectContaining({ transporterId: "transporter-1", normalizedRegistrationNumber: "MH12EF9999" }),
+        ]),
+      );
+      expect(audit.record).toHaveBeenCalledWith(expect.objectContaining({ action: "VEHICLE_BULK_REGISTERED", metadata: { count: 3 } }));
+    });
+
+    it("rejects the whole batch (no DB write) on a duplicate registration number within the batch itself", async () => {
+      await expect(
+        service.registerVehicleBulk(
+          transporterUser,
+          { vehicles: [items[0], { ...items[1], registrationNumber: "mh-12-ab-1234" }] },
+          meta,
+        ),
+      ).rejects.toThrow(ConflictError);
+      expect(vehicles.createMany).not.toHaveBeenCalled();
+    });
+
+    it("rejects the whole batch (no DB write) if any plate is already registered", async () => {
+      vehicles.findByNormalizedRegistrationNumbers.mockResolvedValue([
+        makeVehicle({ normalizedRegistrationNumber: "MH12CD5678" }),
+      ]);
+
+      await expect(service.registerVehicleBulk(transporterUser, { vehicles: items }, meta)).rejects.toThrow(
+        ConflictError,
+      );
+      expect(vehicles.createMany).not.toHaveBeenCalled();
+    });
+
+    it("rejects the whole batch (no DB write) on an invalid item, without registering the valid ones", async () => {
+      await expect(
+        service.registerVehicleBulk(
+          transporterUser,
+          { vehicles: [items[0], { ...items[1], capacityValue: -1 }] },
+          meta,
+        ),
+      ).rejects.toThrow(TransporterDomainError);
+      expect(vehicles.createMany).not.toHaveBeenCalled();
+    });
+
+    it("turns a race-condition P2002 into ConflictError without a partial write", async () => {
+      vehicles.createMany.mockRejectedValue({ code: "P2002" });
+
+      await expect(service.registerVehicleBulk(transporterUser, { vehicles: items }, meta)).rejects.toThrow(
+        ConflictError,
+      );
     });
   });
 
@@ -233,6 +305,19 @@ describe("VehicleService", () => {
       await expect(
         service.updateAvailability(otherTransporterUser, "pub-vehicle-1", "AVAILABLE", meta),
       ).rejects.toThrow(NotFoundError);
+    });
+
+    it("updating one vehicle's availability targets only that vehicle, never the whole fleet", async () => {
+      // Same provider, two vehicles (Step 6): setting Truck A to AVAILABLE
+      // must only ever touch Truck A's row — the repository call is keyed
+      // by that one vehicle's id, not the transporterId.
+      vehicles.findByPublicId.mockResolvedValue(makeVehicle({ id: "truck-a", publicId: "pub-truck-a" }));
+      vehicles.updateAvailability.mockResolvedValue(makeVehicle({ id: "truck-a", availabilityStatus: "AVAILABLE" }));
+
+      await service.updateAvailability(transporterUser, "pub-truck-a", "AVAILABLE", meta);
+
+      expect(vehicles.updateAvailability).toHaveBeenCalledWith("truck-a", "AVAILABLE");
+      expect(vehicles.updateAvailability).not.toHaveBeenCalledWith(expect.stringContaining("transporter"), expect.anything());
     });
   });
 

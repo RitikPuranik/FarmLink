@@ -50,6 +50,7 @@ export class TransporterController {
       limit: number;
       state?: string;
       district?: string;
+      providerType?: ListTransportersQuery["providerType"];
       vehicleType?: ListTransportersQuery["vehicleType"];
       minimumCapacity?: number;
       minimumCapacityUnit: "KG" | "QTL" | "TONNE";
@@ -69,6 +70,7 @@ export class TransporterController {
       limit: q.limit,
       state: q.state,
       district: q.district,
+      providerType: q.providerType,
       vehicleType: q.vehicleType,
       minimumCapacityKg,
       refrigerated: q.refrigerated === undefined ? undefined : q.refrigerated === "true",

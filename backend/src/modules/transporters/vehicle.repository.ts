@@ -37,9 +37,17 @@ export { isUniqueConstraintError };
  */
 export interface VehicleRepository {
   create(data: CreateVehicleData): Promise<VehicleRecord>;
+  /** Part 11 (bulk onboarding) — all-or-nothing: every vehicle is created
+   * in a single database transaction, so a failure partway through (e.g. a
+   * race-condition unique-constraint hit) leaves zero rows behind rather
+   * than a partially-onboarded fleet. Callers must already have validated
+   * and normalized every item, and checked for in-batch/DB duplicates,
+   * before calling this — this method does not re-validate shape. */
+  createMany(data: CreateVehicleData[]): Promise<VehicleRecord[]>;
   findById(id: string): Promise<VehicleRecord | null>;
   findByPublicId(publicId: string): Promise<VehicleRecord | null>;
   findByNormalizedRegistrationNumber(normalized: string): Promise<VehicleRecord | null>;
+  findByNormalizedRegistrationNumbers(normalized: string[]): Promise<VehicleRecord[]>;
   listByTransporter(filters: VehicleListFilters): Promise<VehiclePage>;
   discover(query: VehicleDiscoveryQuery): Promise<string[]>;
   update(id: string, data: UpdateVehicleData): Promise<VehicleRecord>;
@@ -67,6 +75,29 @@ export class PrismaVehicleRepository implements VehicleRepository {
     });
   }
 
+  async createMany(data: CreateVehicleData[]): Promise<VehicleRecord[]> {
+    if (data.length === 0) return [];
+    // $transaction runs every create in one DB transaction: either all
+    // vehicles are persisted or (e.g. on a unique-constraint race) none
+    // are — never a partially-onboarded fleet (Step 11).
+    return this.prisma.$transaction(
+      data.map((item) =>
+        this.prisma.vehicle.create({
+          data: {
+            transporterId: item.transporterId,
+            registrationNumber: item.registrationNumber,
+            normalizedRegistrationNumber: item.normalizedRegistrationNumber,
+            vehicleType: item.vehicleType,
+            capacityUnit: item.capacityUnit,
+            capacityKg: item.capacityKg,
+            capabilities: item.capabilities,
+            isRefrigerated: item.isRefrigerated,
+          },
+        }),
+      ),
+    );
+  }
+
   findById(id: string) {
     return this.prisma.vehicle.findUnique({ where: { id } });
   }
@@ -77,6 +108,13 @@ export class PrismaVehicleRepository implements VehicleRepository {
 
   findByNormalizedRegistrationNumber(normalized: string) {
     return this.prisma.vehicle.findUnique({ where: { normalizedRegistrationNumber: normalized } });
+  }
+
+  findByNormalizedRegistrationNumbers(normalized: string[]) {
+    if (normalized.length === 0) return Promise.resolve([]);
+    return this.prisma.vehicle.findMany({
+      where: { normalizedRegistrationNumber: { in: normalized } },
+    });
   }
 
   async isRegistrationTaken(normalized: string): Promise<boolean> {

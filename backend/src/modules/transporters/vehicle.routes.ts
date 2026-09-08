@@ -9,6 +9,7 @@ import { createAuthMiddleware } from "../auth/auth.middleware";
 import { VehicleController } from "./vehicle.controller";
 import { VehicleService } from "./vehicle.service";
 import {
+  bulkRegisterVehiclesBody,
   listMyVehiclesQuery,
   registerVehicleBody,
   updateAvailabilityBody,
@@ -82,6 +83,56 @@ export function createVehicleRouter(
    */
   router.post("/vehicles", validateBody(registerVehicleBody), asyncHandler(controller.registerVehicle));
   router.get("/vehicles", validateQuery(listMyVehiclesQuery), asyncHandler(controller.listMyVehicles));
+
+  /**
+   * @openapi
+   * /api/vehicles/bulk:
+   *   post:
+   *     tags: [Vehicles]
+   *     summary: Register multiple vehicles under the authenticated transporter in one request
+   *     description: |
+   *       For fleet operators onboarding many vehicles at once (Step 11).
+   *       All-or-nothing: every vehicle is validated (registration number,
+   *       capacity) and checked for duplicates — both within the batch and
+   *       against existing vehicles — before anything is written, and all
+   *       vehicles are then created in a single database transaction. If
+   *       any item is invalid or any registration number is a duplicate,
+   *       no vehicles from the batch are created. Capped at 50 vehicles
+   *       per request.
+   *     requestBody:
+   *       required: true
+   *       content:
+   *         application/json:
+   *           schema:
+   *             type: object
+   *             required: [vehicles]
+   *             properties:
+   *               vehicles:
+   *                 type: array
+   *                 minItems: 1
+   *                 maxItems: 50
+   *                 items:
+   *                   type: object
+   *                   required: [registrationNumber, vehicleType, capacityValue]
+   *                   properties:
+   *                     registrationNumber: { type: string }
+   *                     vehicleType: { type: string, enum: [MINI_TRUCK, PICKUP, LIGHT_TRUCK, MEDIUM_TRUCK, HEAVY_TRUCK, TRACTOR_TROLLEY, REFRIGERATED_TRUCK, OTHER] }
+   *                     capacityValue: { type: number }
+   *                     capacityUnit: { type: string, enum: [KG, QTL, TONNE], default: KG }
+   *                     capabilities: { type: array, items: { type: string, enum: [COVERED, OPEN_BODY, TEMPERATURE_CONTROLLED, BULK_TRANSPORT, SMALL_LOAD_SUITABLE, LARGE_LOAD_SUITABLE] } }
+   *                     isRefrigerated: { type: boolean }
+   *     responses:
+   *       201: { description: All vehicles registered., content: { application/json: { schema: { $ref: '#/components/schemas/SuccessResponse' } } } }
+   *       401: { description: Unauthorized., content: { application/json: { schema: { $ref: '#/components/schemas/ErrorResponse' } } } }
+   *       404: { description: No transporter profile exists yet for this account., content: { application/json: { schema: { $ref: '#/components/schemas/ErrorResponse' } } } }
+   *       409: { description: A duplicate registration number was found within the batch or against existing vehicles — no vehicles were created., content: { application/json: { schema: { $ref: '#/components/schemas/ErrorResponse' } } } }
+   *       422: { description: An invalid registration number or capacity was found — no vehicles were created., content: { application/json: { schema: { $ref: '#/components/schemas/ErrorResponse' } } } }
+   */
+  router.post(
+    "/vehicles/bulk",
+    validateBody(bulkRegisterVehiclesBody),
+    asyncHandler(controller.registerVehiclesBulk),
+  );
 
   /**
    * @openapi

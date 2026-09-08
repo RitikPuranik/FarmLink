@@ -1,4 +1,6 @@
-import { ServiceAreaType, TransporterVerificationStatus } from "@prisma/client";
+import { ServiceAreaType, TransportProviderType, TransporterVerificationStatus } from "@prisma/client";
+
+export { TransportProviderType };
 
 /** Internal shape returned by TransporterRepository — never returned
  * directly from a controller (see toTransporterPublicDTO/toTransporterAdminViewDTO). */
@@ -6,7 +8,9 @@ export interface TransporterProfileRecord {
   id: string;
   publicId: string;
   userId: string;
+  providerType: TransportProviderType;
   businessName: string | null;
+  legalName: string | null;
   contactName: string | null;
   contactPhone: string | null;
   contactEmail: string | null;
@@ -20,14 +24,18 @@ export interface TransporterProfileRecord {
 
 export interface CreateTransporterProfileData {
   userId: string;
+  providerType?: TransportProviderType;
   businessName?: string | null;
+  legalName?: string | null;
   contactName?: string | null;
   contactPhone?: string | null;
   contactEmail?: string | null;
 }
 
 export interface UpdateTransporterProfileData {
+  providerType?: TransportProviderType;
   businessName?: string | null;
+  legalName?: string | null;
   contactName?: string | null;
   contactPhone?: string | null;
   contactEmail?: string | null;
@@ -61,7 +69,9 @@ export interface CreateServiceAreaData {
  */
 export interface TransporterPublicDTO {
   transporterId: string;
+  providerType: TransportProviderType;
   businessName: string | null;
+  legalName: string | null;
   contactName: string | null;
   contactPhone: string | null;
   contactEmail: string | null;
@@ -110,7 +120,9 @@ export function toTransporterPublicDTO(
 ): TransporterPublicDTO {
   return {
     transporterId: row.publicId,
+    providerType: row.providerType,
     businessName: row.businessName,
+    legalName: row.legalName,
     contactName: row.contactName,
     contactPhone: row.contactPhone,
     contactEmail: row.contactEmail,

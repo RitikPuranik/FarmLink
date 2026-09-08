@@ -13,7 +13,9 @@ function makeProfile(overrides: Partial<any> = {}) {
     id: "transporter-1",
     publicId: "pub-transporter-1",
     userId: "user-1",
+    providerType: "INDIVIDUAL",
     businessName: "Acme Logistics",
+    legalName: null,
     contactName: "Ravi",
     contactPhone: "9999999999",
     contactEmail: "ravi@example.com",
@@ -93,6 +95,31 @@ describe("TransporterService", () => {
 
       await expect(service.createProfile(transporterUser, {}, meta)).rejects.toThrow(ConflictError);
       expect(transporters.create).not.toHaveBeenCalled();
+    });
+
+    it("defaults providerType to INDIVIDUAL when not specified", async () => {
+      transporters.findByUserId.mockResolvedValue(null);
+      transporters.create.mockResolvedValue(makeProfile());
+
+      await service.createProfile(transporterUser, { businessName: "Ramesh Transport" }, meta);
+
+      expect(transporters.create).toHaveBeenCalledWith(expect.objectContaining({ providerType: "INDIVIDUAL" }));
+    });
+
+    it("honors an explicit COMPANY providerType — same TransporterProfile -> Vehicle[] shape as an individual", async () => {
+      transporters.findByUserId.mockResolvedValue(null);
+      transporters.create.mockResolvedValue(makeProfile({ providerType: "COMPANY", businessName: "ABC Logistics Pvt Ltd" }));
+
+      const result = await service.createProfile(
+        transporterUser,
+        { providerType: "COMPANY", businessName: "ABC Logistics Pvt Ltd", legalName: "ABC Logistics Private Limited" },
+        meta,
+      );
+
+      expect(transporters.create).toHaveBeenCalledWith(
+        expect.objectContaining({ providerType: "COMPANY", legalName: "ABC Logistics Private Limited" }),
+      );
+      expect(result.providerType).toBe("COMPANY");
     });
   });
 

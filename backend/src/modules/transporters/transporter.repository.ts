@@ -1,4 +1,4 @@
-import { PrismaClient, TransporterVerificationStatus } from "@prisma/client";
+import { PrismaClient, TransportProviderType, TransporterVerificationStatus } from "@prisma/client";
 import {
   CreateTransporterProfileData,
   ServiceAreaRecord,
@@ -9,6 +9,7 @@ import {
 export interface TransporterSearchFilters {
   state?: string;
   district?: string;
+  providerType?: TransportProviderType;
   verificationStatus?: TransporterVerificationStatus;
   isActive?: boolean;
   /** Internal transporter ids to restrict the search to (Part N discovery
@@ -65,7 +66,9 @@ export class PrismaTransporterRepository implements TransporterRepository {
     return this.prisma.transporterProfile.create({
       data: {
         userId: data.userId,
+        ...(data.providerType !== undefined ? { providerType: data.providerType } : {}),
         businessName: data.businessName ?? null,
+        legalName: data.legalName ?? null,
         contactName: data.contactName ?? null,
         contactPhone: data.contactPhone ?? null,
         contactEmail: data.contactEmail ?? null,
@@ -77,7 +80,9 @@ export class PrismaTransporterRepository implements TransporterRepository {
     return this.prisma.transporterProfile.update({
       where: { id },
       data: {
+        ...(data.providerType !== undefined ? { providerType: data.providerType } : {}),
         ...(data.businessName !== undefined ? { businessName: data.businessName } : {}),
+        ...(data.legalName !== undefined ? { legalName: data.legalName } : {}),
         ...(data.contactName !== undefined ? { contactName: data.contactName } : {}),
         ...(data.contactPhone !== undefined ? { contactPhone: data.contactPhone } : {}),
         ...(data.contactEmail !== undefined ? { contactEmail: data.contactEmail } : {}),
@@ -93,6 +98,7 @@ export class PrismaTransporterRepository implements TransporterRepository {
     const where = {
       ...(filters.isActive !== undefined ? { isActive: filters.isActive } : {}),
       ...(filters.verificationStatus ? { verificationStatus: filters.verificationStatus } : {}),
+      ...(filters.providerType ? { providerType: filters.providerType } : {}),
       ...(filters.transporterIds ? { id: { in: filters.transporterIds } } : {}),
       ...(filters.state || filters.district
         ? {

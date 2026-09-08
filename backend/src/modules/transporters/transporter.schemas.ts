@@ -14,12 +14,15 @@ const vehicleType = z.enum([
 ]);
 const availabilityStatus = z.enum(["AVAILABLE", "UNAVAILABLE"]);
 const transporterVerificationStatus = z.enum(["PENDING", "VERIFIED", "REJECTED", "SUSPENDED"]);
+const transportProviderType = z.enum(["INDIVIDUAL", "BUSINESS", "COMPANY", "COOPERATIVE", "LOGISTICS_PROVIDER"]);
 
 export const transporterPublicIdParams = z.object({ publicId });
 
 export const createTransporterProfileBody = z
   .object({
+    providerType: transportProviderType.optional(),
     businessName: z.string().trim().min(1).max(160).optional(),
+    legalName: z.string().trim().min(1).max(200).optional(),
     contactName: z.string().trim().min(1).max(120).optional(),
     contactPhone: z.string().trim().min(6).max(20).optional(),
     contactEmail: z.string().trim().email("Enter a valid email address.").optional(),
@@ -55,6 +58,7 @@ export const listTransportersQuery = z
     limit: z.coerce.number().int().positive().max(100).default(20),
     state: z.string().trim().min(1).max(80).optional(),
     district: z.string().trim().min(1).max(80).optional(),
+    providerType: transportProviderType.optional(),
     vehicleType: vehicleType.optional(),
     minimumCapacity: z.coerce.number().finite().positive().optional(),
     minimumCapacityUnit: z.enum(["KG", "QTL", "TONNE"]).default("KG"),

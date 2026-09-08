@@ -2388,6 +2388,21 @@ enum TransporterVerificationStatus {
   SUSPENDED
 }
 
+// Clarifies what a TransporterProfile row *represents* (Part A/architecture
+// correction): the same TransporterProfile -> Vehicle[] shape already
+// covers everything from a single owner-operator to a 100-truck logistics
+// company — this enum only labels which kind of entity a given profile is,
+// it does not change the ownership model. Defaults to INDIVIDUAL because
+// that was the only case existing rows could represent before this field
+// existed.
+enum TransportProviderType {
+  INDIVIDUAL
+  BUSINESS
+  COMPANY
+  COOPERATIVE
+  LOGISTICS_PROVIDER
+}
+
 enum VehicleType {
   MINI_TRUCK
   PICKUP
@@ -2454,7 +2469,21 @@ model TransporterProfile {
 
   userId String @unique
 
+  // What kind of transport provider this profile represents — an
+  // individual owner-operator through to a logistics company. Does not
+  // change the underlying relation: every provider, regardless of type,
+  // owns/manages its `vehicles` the same way (one TransporterProfile ->
+  // many Vehicle rows already supported multi-vehicle fleets before this
+  // field existed; this only makes the entity type explicit and
+  // queryable instead of implied by businessName being null/non-null).
+  providerType TransportProviderType @default(INDIVIDUAL)
+
   businessName String?
+  // Optional registered/legal name, distinct from the trading name in
+  // businessName (e.g. businessName "ABC Logistics", legalName "ABC
+  // Logistics Private Limited"). Never required — many INDIVIDUAL
+  // providers will never set this.
+  legalName    String?
   contactName  String?
   contactPhone String?
   contactEmail String?
@@ -2476,6 +2505,7 @@ model TransporterProfile {
 
   @@index([verificationStatus])
   @@index([isActive])
+  @@index([providerType])
   @@map("transporter_profiles")
 }
 

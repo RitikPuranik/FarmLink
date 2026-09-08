@@ -39,7 +39,12 @@ export function createTransporterRouter(
    *     summary: Create the authenticated user's transporter profile
    *     description: |
    *       A TRANSPORTER may create exactly one profile for their account. Always
-   *       starts with verificationStatus PENDING — never auto-verified.
+   *       starts with verificationStatus PENDING — never auto-verified. A
+   *       transporter profile represents a transport *provider* — an
+   *       individual owner-operator, a small business, a company, a
+   *       cooperative, or a logistics provider — which may go on to
+   *       register any number of vehicles (see POST /api/vehicles). One
+   *       provider profile is not one vehicle.
    *     requestBody:
    *       required: false
    *       content:
@@ -47,7 +52,9 @@ export function createTransporterRouter(
    *           schema:
    *             type: object
    *             properties:
+   *               providerType: { type: string, enum: [INDIVIDUAL, BUSINESS, COMPANY, COOPERATIVE, LOGISTICS_PROVIDER], default: INDIVIDUAL }
    *               businessName: { type: string }
+   *               legalName: { type: string }
    *               contactName: { type: string }
    *               contactPhone: { type: string }
    *               contactEmail: { type: string, format: email }
@@ -85,7 +92,9 @@ export function createTransporterRouter(
    *           schema:
    *             type: object
    *             properties:
+   *               providerType: { type: string, enum: [INDIVIDUAL, BUSINESS, COMPANY, COOPERATIVE, LOGISTICS_PROVIDER] }
    *               businessName: { type: string }
+   *               legalName: { type: string }
    *               contactName: { type: string }
    *               contactPhone: { type: string }
    *               contactEmail: { type: string, format: email }
