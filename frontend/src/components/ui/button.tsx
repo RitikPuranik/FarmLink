@@ -25,8 +25,8 @@ export const Button = React.forwardRef<HTMLButtonElement, ButtonProps>(
         className={cn(
           // Large min-height + generous padding: easy to tap on mobile per
           // the spec's "large inputs, large buttons" requirement.
-          "inline-flex w-full items-center justify-center gap-2 rounded-lg px-4 py-3.5 text-base font-medium",
-          "transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2",
+          "inline-flex w-full items-center justify-center gap-2 rounded-xl px-4 py-3 text-sm font-bold tracking-[-0.01em]",
+          "transition-all duration-200 shadow-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2",
           "disabled:pointer-events-none disabled:opacity-60",
           variantClasses[variant],
           className,
