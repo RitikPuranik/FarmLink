@@ -1,4 +1,22 @@
-import fs from "node:fs";
+import path from "node:path";
+import { readCsvRows } from "../../src/modules/warehouse-intelligence/wdra-csv-parser";
+import { mapWdraCsvRowToExternalRecord } from "../../src/modules/warehouse-intelligence/wdra-record-mapper";
+
+describe("WDRA CSV parser", () => {
+  it("skips comment lines before the header", async () => {
+    const rows = readCsvRows(path.resolve(process.cwd(), "data/wdra/wdra-warehouses.csv"));
+    const firstRow = (await rows.next()).value;
+
+    expect(firstRow).toMatchObject({
+      "WH ID": "7121767",
+      "WH Name": "B R GRAINS PVT LTD",
+      District: "Hooghly",
+      State: "West Bengal",
+      "Capacity(in MT)": "2154",
+    });
+    expect(mapWdraCsvRowToExternalRecord(firstRow).externalId).toBe("7121767");
+  });
+});import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { csvColumns, readCsvRows } from "../../src/modules/warehouse-intelligence/wdra-csv-parser";

@@ -50,7 +50,7 @@ export async function* readCsvRows(filePath: string): AsyncGenerator<Record<stri
   const lines = readline.createInterface({ input, crlfDelay: Infinity });
   let headers: string[] | undefined;
   for await (const line of lines) {
-    if (!line.trim()) continue;
+    if (!line.trim() || line.trimStart().startsWith("#")) continue;
     const cells = csvColumns(line);
     if (!headers) {
       // Strip a UTF-8 BOM if the export was saved with one (common for
