@@ -12,6 +12,39 @@ import { useDistrictsQuery, useIrrigationTypesQuery, useStatesQuery, useTalukasQ
 import { FarmFormValues, farmFormSchema } from "@/features/farms/farm.schemas";
 import { ApiRequestError } from "@/types/api";
 
+// Surfaces *why* a dropdown is empty instead of failing silently. Without
+// this, a failed or not-yet-seeded reference-data call just leaves the
+// select showing nothing but the placeholder, which looks (and feels) like
+// the control itself is broken.
+function ReferenceDataStatus({
+  query,
+  errorMessage,
+  emptyMessage,
+}: {
+  query: { isError: boolean; isSuccess: boolean; isLoading: boolean; data?: unknown[]; refetch: () => void };
+  errorMessage: string;
+  emptyMessage: string;
+}) {
+  const { t } = useI18n();
+
+  if (query.isError) {
+    return (
+      <p className="mt-1 flex items-center gap-2 text-sm text-red-600">
+        {errorMessage}
+        <button type="button" className="underline" onClick={() => query.refetch()}>
+          {t("common.retry")}
+        </button>
+      </p>
+    );
+  }
+
+  if (query.isSuccess && (query.data?.length ?? 0) === 0) {
+    return <p className="mt-1 text-sm text-slate-500">{emptyMessage}</p>;
+  }
+
+  return null;
+}
+
 export function FarmForm({
   initialValues,
   onSubmit,
@@ -93,15 +126,23 @@ export function FarmForm({
 
       <div>
         <Label htmlFor="farm-name">{t("farm.name")}</Label>
-        <Input id="farm-name" placeholder={t("farm.namePlaceholder")} {...register("name")} />
+        <Input id="farm-name" data-tour="farm-name-field" placeholder={t("farm.namePlaceholder")} {...register("name")} />
         <FieldError>{errors.name && t(errors.name.message!)}</FieldError>
       </div>
 
       <div className="grid gap-4 sm:grid-cols-2">
         <div>
           <Label htmlFor="farm-state">{t("farm.state")}</Label>
-          <Select id="farm-state" hasError={!!errors.stateId} {...register("stateId")}>
-            <option value="">{t("common.selectPlaceholder")}</option>
+          <Select
+            id="farm-state"
+            data-tour="farm-state-field"
+            hasError={!!errors.stateId || statesQuery.isError}
+            disabled={statesQuery.isLoading}
+            {...register("stateId")}
+          >
+            <option value="">
+              {statesQuery.isLoading ? t("common.loading") : t("common.selectPlaceholder")}
+            </option>
             {statesQuery.data?.map((s) => (
               <option key={s.id} value={s.id}>
                 {s.name}
@@ -109,12 +150,24 @@ export function FarmForm({
             ))}
           </Select>
           <FieldError>{errors.stateId && t(errors.stateId.message!)}</FieldError>
+          <ReferenceDataStatus
+            query={statesQuery}
+            errorMessage={t("farm.stateLoadError")}
+            emptyMessage={t("farm.stateNoneAvailable")}
+          />
         </div>
 
         <div>
           <Label htmlFor="farm-district">{t("farm.district")}</Label>
-          <Select id="farm-district" disabled={!stateId} hasError={!!errors.districtId} {...register("districtId")}>
-            <option value="">{t("common.selectPlaceholder")}</option>
+          <Select
+            id="farm-district"
+            disabled={!stateId || districtsQuery.isLoading}
+            hasError={!!errors.districtId || districtsQuery.isError}
+            {...register("districtId")}
+          >
+            <option value="">
+              {districtsQuery.isLoading ? t("common.loading") : t("common.selectPlaceholder")}
+            </option>
             {districtsQuery.data?.map((d) => (
               <option key={d.id} value={d.id}>
                 {d.name}
@@ -122,12 +175,26 @@ export function FarmForm({
             ))}
           </Select>
           <FieldError>{errors.districtId && t(errors.districtId.message!)}</FieldError>
+          {!!stateId && (
+            <ReferenceDataStatus
+              query={districtsQuery}
+              errorMessage={t("farm.districtLoadError")}
+              emptyMessage={t("farm.districtNoneAvailable")}
+            />
+          )}
         </div>
 
         <div>
           <Label htmlFor="farm-taluka">{t("farm.taluka")}</Label>
-          <Select id="farm-taluka" disabled={!districtId} hasError={!!errors.talukaId} {...register("talukaId")}>
-            <option value="">{t("common.selectPlaceholder")}</option>
+          <Select
+            id="farm-taluka"
+            disabled={!districtId || talukasQuery.isLoading}
+            hasError={!!errors.talukaId || talukasQuery.isError}
+            {...register("talukaId")}
+          >
+            <option value="">
+              {talukasQuery.isLoading ? t("common.loading") : t("common.selectPlaceholder")}
+            </option>
             {talukasQuery.data?.map((tk) => (
               <option key={tk.id} value={tk.id}>
                 {tk.name}
@@ -135,6 +202,13 @@ export function FarmForm({
             ))}
           </Select>
           <FieldError>{errors.talukaId && t(errors.talukaId.message!)}</FieldError>
+          {!!districtId && (
+            <ReferenceDataStatus
+              query={talukasQuery}
+              errorMessage={t("farm.talukaLoadError")}
+              emptyMessage={t("farm.talukaNoneAvailable")}
+            />
+          )}
         </div>
 
         <div>
@@ -161,6 +235,7 @@ export function FarmForm({
           <Label htmlFor="farm-area">{t("farm.area")}</Label>
           <Input
             id="farm-area"
+            data-tour="farm-area-field"
             type="number"
             step="0.01"
             inputMode="decimal"
@@ -190,7 +265,7 @@ export function FarmForm({
       </div>
 
       <div className="flex gap-3 pt-2">
-        <Button type="submit" isLoading={isSubmitting}>
+        <Button type="submit" data-tour="farm-submit-button" isLoading={isSubmitting}>
           {submitLabel}
         </Button>
         {onCancel && (
