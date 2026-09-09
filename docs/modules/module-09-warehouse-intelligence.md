@@ -1590,8 +1590,6 @@ suites / 597 of 613 tests pass; the 3 failing suites
 `warehouse-recommendation.service.test.ts`) fail on `Prisma.Decimal is not
 a constructor` — the same pre-existing, unrelated environment limitation,
 present before this layer's changes and untouched by them.
-<<<<<<< HEAD
-=======
 
 ## Government Warehouse Data Ingestion status: WDRA CSV importer + FCI/IISFM live provider — Done, with one honestly-unresolved caveat (FCI live response shape)
 
@@ -2100,4 +2098,3 @@ Assumptions or unresolved issues:
   - No git commit or push was made, per this task's explicit instruction
 ```
 
->>>>>>> c5b5723b4094f6b11a5d4b86304238110b74f4dd
