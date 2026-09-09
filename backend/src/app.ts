@@ -66,13 +66,6 @@ import { env } from "./config/env";
 import { MarketIntelligenceRepository } from "./modules/market-intelligence/market-intelligence.repository";
 import { MarketIntelligenceService } from "./modules/market-intelligence/market-intelligence.service";
 import { createMarketIntelligenceRouter } from "./modules/market-intelligence/market-intelligence.routes";
-import { PriceHistoryRepository } from "./modules/price-forecasting/price-history.repository";
-import { PriceHistoryPreparationService } from "./modules/price-forecasting/price-history-preparation.service";
-import { BaselineForecastEngine } from "./modules/price-forecasting/price-forecasting.engine";
-import { PriceForecastRepository } from "./modules/price-forecasting/price-forecasting.repository";
-import { PriceForecastGenerationService } from "./modules/price-forecasting/price-forecast-generation.service";
-import { PriceForecastingService } from "./modules/price-forecasting/price-forecasting.service";
-import { createPriceForecastingRouter } from "./modules/price-forecasting/price-forecasting.routes";
 import { BuyerMatchingService } from "./modules/buyer-matching/buyer-matching.service";
 import { createBuyerMatchingRouter } from "./modules/buyer-matching/buyer-matching.routes";
 import { PrismaWarehouseRepository } from "./modules/warehouse-intelligence/warehouse.repository";
@@ -91,7 +84,7 @@ import {
 import { WarehouseStorageIntelligenceProvider } from "./modules/warehouse-intelligence/storage-intelligence-provider.service";
 import { createWarehouseIntelligenceRouter } from "./modules/warehouse-intelligence/warehouse-intelligence.routes";
 import { FarmLinkWarehouseProvider } from "./modules/warehouse-intelligence/providers/farmlink-warehouse-provider";
-import { UnavailableGovernmentWarehouseProvider } from "./modules/warehouse-intelligence/providers/government-warehouse-provider";
+import { FciIisfmWarehouseProvider } from "./modules/warehouse-intelligence/providers/fci-iisfm-warehouse-provider";
 import { UnavailablePartnerWarehouseProvider } from "./modules/warehouse-intelligence/providers/partner-warehouse-provider";
 import { WarehouseProviderRegistry } from "./modules/warehouse-intelligence/providers/warehouse-provider-registry";
 import { WarehouseDuplicateDetectionService } from "./modules/warehouse-intelligence/warehouse-duplicate-detection.service";
@@ -296,27 +289,6 @@ export function createApp(deps: AppDependencies): Express {
     deps.auditService,
   );
 
-  // Module 7 — deterministic price forecasting. Reuses the Module 6
-  // market repository and the same Prisma client; the preparation layer
-  // handles bounded historical windows and data sufficiency, while the
-  // engine remains pure and deterministic.
-  const priceHistoryRepository = new PriceHistoryRepository(deps.prisma);
-  const priceHistoryPreparationService = new PriceHistoryPreparationService(priceHistoryRepository);
-  const baselineForecastEngine = new BaselineForecastEngine();
-  const priceForecastRepository = new PriceForecastRepository(deps.prisma);
-  const priceForecastGenerationService = new PriceForecastGenerationService(
-    priceHistoryPreparationService,
-    baselineForecastEngine,
-    priceForecastRepository,
-  );
-  const priceForecastingService = new PriceForecastingService(
-    priceForecastGenerationService,
-    priceForecastRepository,
-    marketIntelligenceRepository,
-    deps.prisma,
-    deps.auditService,
-  );
-
   // Module 9 Part 2 — Warehouse Intelligence. Same "thin wrapper over
   // deps.prisma, constructed inline" pattern as marketIntelligenceRepository
   // above rather than an AppDependencies field, since Part 1 established
@@ -427,11 +399,6 @@ export function createApp(deps: AppDependencies): Express {
     "/api/market-intelligence",
     createMarketIntelligenceRouter(marketIntelligenceService, deps.authRepository, deps.auditService),
   );
-
-  app.use(
-    "/api/price-forecasting",
-    createPriceForecastingRouter(priceForecastingService, deps.authRepository, deps.auditService),
-  );
   app.use("/api", createBuyerMatchingRouter(buyerMatchingService, deps.authRepository, deps.auditService));
   app.use(
     "/api/warehouses",
@@ -454,7 +421,13 @@ export function createApp(deps: AppDependencies): Express {
   // read.
   const warehouseProviderRegistry = new WarehouseProviderRegistry([
     new FarmLinkWarehouseProvider(),
-    new UnavailableGovernmentWarehouseProvider(),
+    // GOVERNMENT provider slot: the live FCI/IISFM depot provider, gated
+    // by the same WAREHOUSE_GOVERNMENT_PROVIDER_ENABLED flag the old
+    // UnavailableGovernmentWarehouseProvider placeholder used — see that
+    // file's own docstring for why it's kept around (a template for a
+    // possible future second government source, e.g. NABARD, explicitly
+    // out of scope here) even though it's no longer registered here.
+    new FciIisfmWarehouseProvider(),
     new UnavailablePartnerWarehouseProvider(),
   ]);
   const warehouseSourceReferenceRepository = new PrismaWarehouseSourceReferenceRepository(deps.prisma);

@@ -89,4 +89,33 @@ describe("normalizeExternalWarehouseRecord", () => {
     expect(result.metadata).toEqual({ registryId: "WDRA-1" });
     expect(result.sourceUpdatedAt).toEqual(new Date("2026-01-01T00:00:00Z"));
   });
+
+  describe("status normalization (WDRA Active/Inactive/Suspended mapping)", () => {
+    it.each([
+      ["Active", "ACTIVE"],
+      ["active", "ACTIVE"],
+      ["  ACTIVE  ", "ACTIVE"],
+      ["Inactive", "INACTIVE"],
+      ["INACTIVE", "INACTIVE"],
+      ["Suspended", "SUSPENDED"],
+      ["suspended", "SUSPENDED"],
+    ])("maps %s -> %s, handling case/whitespace safely", (raw, expected) => {
+      const result = normalizeExternalWarehouseRecord(baseRecord({ status: raw }));
+      expect(result.status).toBe(expected);
+    });
+
+    it("returns null (never guessed) and warns for an unrecognized status", () => {
+      const result = normalizeExternalWarehouseRecord(baseRecord({ status: "Under Review" }));
+      expect(result.status).toBeNull();
+      expect(result.warnings).toEqual(
+        expect.arrayContaining([expect.objectContaining({ field: "status", code: "UNRECOGNIZED_STATUS" })]),
+      );
+    });
+
+    it("returns null without a warning when no status was supplied at all", () => {
+      const result = normalizeExternalWarehouseRecord(baseRecord({ status: undefined }));
+      expect(result.status).toBeNull();
+      expect(result.warnings.some((w) => w.field === "status")).toBe(false);
+    });
+  });
 });

@@ -1,0 +1,32 @@
+{
+  "_fixtureNote": "NOT a live capture of https://api.iisfm.nic.in/DepotsWithCap. Direct network access to that endpoint was blocked (robots.txt) in the environment this fixture was built in, and no public documentation of its exact response body could be found. This fixture is constructed from the field list documented in the ingestion task itself (Depot Code, Depot Name, Total Capacity, Covered Capacity, Open Capacity, Revenue State, Revenue District), used only to exercise fci-iisfm-record-mapper.ts's tolerant parsing deterministically. Replace with a real captured response the first time this provider is run against the live endpoint from a network that can reach it.",
+  "data": [
+    {
+      "Depot Code": "FCI-DL-001",
+      "Depot Name": "Bijwasan CWC Depot",
+      "Total Capacity": "12500",
+      "Covered Capacity": "10000",
+      "Open Capacity": "2500",
+      "Revenue State": "Delhi",
+      "Revenue District": "South West Delhi"
+    },
+    {
+      "Depot Code": "FCI-PB-014",
+      "Depot Name": "Moga FCI Depot",
+      "Total Capacity": "45000",
+      "Covered Capacity": "45000",
+      "Open Capacity": "0",
+      "Revenue State": "Punjab",
+      "Revenue District": "Moga"
+    },
+    {
+      "Depot Code": "",
+      "Depot Name": "Unnamed depot missing a code",
+      "Total Capacity": "500",
+      "Covered Capacity": "500",
+      "Open Capacity": "0",
+      "Revenue State": "Punjab",
+      "Revenue District": "Moga"
+    }
+  ]
+}
