@@ -179,13 +179,18 @@ describe("WDRA CSV import through the shared warehouse sync pipeline", () => {
     expect([...warehouses.values()][0]).toMatchObject({ status: "INACTIVE", isActive: false });
   });
 
-  it("collapses a duplicate WH ID within one CSV file into a single warehouse (second row updates, not creates)", async () => {
+  it("collapses a duplicate WH ID within one CSV file into a single warehouse (second row never creates a second one)", async () => {
     const { prisma, warehouses } = makeFakePrisma();
+    // Remarks only ever lands in WarehouseSourceReference metadata, never
+    // on the Warehouse row itself — so the second row's warehouse-facing
+    // data is identical to the first and correctly counts as `unchanged`,
+    // not a second `created` or even an `updated` (Part 7/20: no
+    // unnecessary UPDATE for identical data).
     const summary = await runSync(prisma, [activeRow, { ...activeRow, Remarks: "Duplicate row in the export" }]);
 
     expect(warehouses.size).toBe(1);
     const providerSummary = summary.providers.find((p) => p.providerId === "wdra");
-    expect(providerSummary).toMatchObject({ created: 1, updated: 1 });
+    expect(providerSummary).toMatchObject({ created: 1, updated: 0, unchanged: 1 });
   });
 
   it("skips a row with a missing WH ID as invalid without stopping the rest of the import", async () => {

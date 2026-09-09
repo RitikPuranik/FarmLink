@@ -172,7 +172,7 @@ describe("WarehouseSyncService", () => {
     expect([...sourceRefs.values()][0]).toMatchObject({ providerId: "government-wdra", externalId: "wdra-1", warehouseId: warehouse.id });
   });
 
-  it("is idempotent: running the same record twice updates instead of duplicating", async () => {
+  it("is idempotent: running the same record twice never duplicates the warehouse row", async () => {
     const { prisma, warehouses, sourceRefs } = makeFakePrisma();
     const { service } = buildService(prisma, [providerReturning("government-wdra", [externalRecord()])]);
 
@@ -181,7 +181,56 @@ describe("WarehouseSyncService", () => {
 
     expect(warehouses.size).toBe(1);
     expect(sourceRefs.size).toBe(1);
-    expect(summary2.totals).toMatchObject({ created: 0, updated: 1, linked: 0 });
+    // Second run's data is byte-for-byte identical to the first — this
+    // must be counted as `unchanged`, not `updated` (Part 7/20 of the
+    // ingestion spec).
+    expect(summary2.totals).toMatchObject({ created: 0, updated: 0, unchanged: 1, linked: 0 });
+  });
+
+  it("does not issue a warehouse or storage-unit UPDATE when the re-fetched record is identical", async () => {
+    const { prisma } = makeFakePrisma();
+    const { service } = buildService(prisma, [providerReturning("government-wdra", [externalRecord()])]);
+
+    await service.run();
+    const warehouseUpdateSpy = jest.spyOn(prisma.warehouse, "update");
+    const storageUpdateSpy = jest.spyOn(prisma.warehouseStorageUnit, "update");
+    const storageCreateSpy = jest.spyOn(prisma.warehouseStorageUnit, "create");
+
+    const summary2 = await service.run();
+
+    expect(summary2.totals).toMatchObject({ unchanged: 1, updated: 0 });
+    expect(warehouseUpdateSpy).not.toHaveBeenCalled();
+    expect(storageUpdateSpy).not.toHaveBeenCalled();
+    expect(storageCreateSpy).not.toHaveBeenCalled();
+  });
+
+  it("still refreshes lastSyncedAt on an unchanged record even though no warehouse write happens", async () => {
+    const { prisma, sourceRefs } = makeFakePrisma();
+    const { service } = buildService(prisma, [providerReturning("government-wdra", [externalRecord()])]);
+
+    await service.run();
+    const firstSyncedAt = [...sourceRefs.values()][0].lastSyncedAt;
+
+    await new Promise((resolve) => setTimeout(resolve, 5));
+    const summary2 = await service.run();
+
+    expect(summary2.totals).toMatchObject({ unchanged: 1 });
+    const secondSyncedAt = [...sourceRefs.values()][0].lastSyncedAt;
+    expect(secondSyncedAt.getTime()).toBeGreaterThan(firstSyncedAt.getTime());
+  });
+
+  it("counts as updated (not unchanged) when only capacity actually changed", async () => {
+    const { prisma, storageUnits } = makeFakePrisma();
+    const { service: first } = buildService(prisma, [providerReturning("government-wdra", [externalRecord()])]);
+    await first.run();
+
+    const { service: second } = buildService(prisma, [
+      providerReturning("government-wdra", [externalRecord({ storage: { totalCapacity: "650", availableCapacity: "200", capacityUnit: "TONNE", storageType: "cold storage" } })]),
+    ]);
+    const summary2 = await second.run();
+
+    expect(summary2.totals).toMatchObject({ updated: 1, unchanged: 0 });
+    expect([...storageUnits.values()][0]).toMatchObject({ totalCapacity: 650_000 });
   });
 
   it("refreshes source-owned fields on update without nulling out fields the new fetch omitted", async () => {

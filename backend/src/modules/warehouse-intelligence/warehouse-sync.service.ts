@@ -36,6 +36,15 @@ export interface ProviderSyncSummary {
   fetched: number;
   created: number;
   updated: number;
+  /** Already had a matching WarehouseSourceReference AND the incoming
+   * record's data was identical to what's already stored — no Warehouse
+   * or WarehouseStorageUnit write was issued at all, only the source
+   * reference's own bookkeeping (lastSyncedAt/sourceUpdatedAt/metadata)
+   * was refreshed. Distinct from `updated`, which means at least one
+   * actual field changed. This keeps a daily full-fetch sync of a mostly
+   * static dataset cheap and observable instead of rewriting every row
+   * every day. */
+  unchanged: number;
   /** Deterministically MATCHED to an existing warehouse: no fields were
    * overwritten, only a new WarehouseSourceReference was attached for
    * provenance (Part 15: never blindly overwrite data this sync doesn't
@@ -65,6 +74,7 @@ export interface WarehouseSyncSummary {
     fetched: number;
     created: number;
     updated: number;
+    unchanged: number;
     linked: number;
     duplicatesFlagged: number;
     skipped: number;
@@ -79,13 +89,14 @@ function sumTotals(providers: ProviderSyncSummary[]): WarehouseSyncSummary["tota
       fetched: acc.fetched + p.fetched,
       created: acc.created + p.created,
       updated: acc.updated + p.updated,
+      unchanged: acc.unchanged + p.unchanged,
       linked: acc.linked + p.linked,
       duplicatesFlagged: acc.duplicatesFlagged + p.duplicatesFlagged,
       skipped: acc.skipped + p.skipped,
       failed: acc.failed + p.failed,
       warnings: acc.warnings + p.warnings,
     }),
-    { fetched: 0, created: 0, updated: 0, linked: 0, duplicatesFlagged: 0, skipped: 0, failed: 0, warnings: 0 },
+    { fetched: 0, created: 0, updated: 0, unchanged: 0, linked: 0, duplicatesFlagged: 0, skipped: 0, failed: 0, warnings: 0 },
   );
 }
 
@@ -137,6 +148,7 @@ export class WarehouseSyncService {
           fetched: result.warehouses.length,
           created: 0,
           updated: 0,
+          unchanged: 0,
           linked: 0,
           duplicatesFlagged: 0,
           skipped: 0,
@@ -160,6 +172,7 @@ export class WarehouseSyncService {
           fetched: 0,
           created: 0,
           updated: 0,
+          unchanged: 0,
           linked: 0,
           duplicatesFlagged: 0,
           skipped: 0,
@@ -210,6 +223,7 @@ export class WarehouseSyncService {
   ): Promise<ProviderSyncSummary> {
     let created = 0;
     let updated = 0;
+    let unchanged = 0;
     let linked = 0;
     let duplicatesFlagged = 0;
     let skipped = 0;
@@ -245,6 +259,7 @@ export class WarehouseSyncService {
         const outcome = await this.persistOne(provider, validation.record);
         if (outcome === "CREATED") created += 1;
         else if (outcome === "UPDATED") updated += 1;
+        else if (outcome === "UNCHANGED") unchanged += 1;
         else if (outcome === "LINKED") linked += 1;
         else if (outcome === "CREATED_POSSIBLE_DUPLICATE") {
           created += 1;
@@ -267,6 +282,7 @@ export class WarehouseSyncService {
       fetched: records.length,
       created,
       updated,
+      unchanged,
       linked,
       duplicatesFlagged,
       skipped,
@@ -283,7 +299,7 @@ export class WarehouseSyncService {
   private async persistOne(
     provider: { id: string; type: ExternalWarehouseProviderType },
     record: ReturnType<typeof normalizeExternalWarehouseRecord>,
-  ): Promise<"CREATED" | "UPDATED" | "LINKED" | "CREATED_POSSIBLE_DUPLICATE"> {
+  ): Promise<"CREATED" | "UPDATED" | "UNCHANGED" | "LINKED" | "CREATED_POSSIBLE_DUPLICATE"> {
     return this.prisma.$transaction(async (tx: Prisma.TransactionClient) => {
       const existingReference = await this.sourceReferences.findByProviderExternalId(provider.id, record.externalId);
 
@@ -294,30 +310,68 @@ export class WarehouseSyncService {
         // below), never nulling out a previously-known value just because
         // this particular fetch happened not to include it again.
         const warehouse = await tx.warehouse.findUnique({ where: { id: existingReference.warehouseId } });
+        let warehouseChanged = false;
+        let storageChanged = false;
         if (warehouse) {
-          await tx.warehouse.update({
-            where: { id: warehouse.id },
-            data: {
-              name: record.name ?? warehouse.name,
-              warehouseType: record.storageType ?? warehouse.warehouseType,
-              state: record.location.state ?? warehouse.state,
-              district: record.location.district ?? warehouse.district,
-              address: record.location.address ?? warehouse.address,
-              pincode: record.location.pincode ?? warehouse.pincode,
-              latitude: record.location.latitude ?? warehouse.latitude,
-              longitude: record.location.longitude ?? warehouse.longitude,
-              // Same "only overwrite with what THIS fetch actually
-              // supplied" rule as every other field above: a source that
-              // reported no status this run leaves the warehouse's
-              // existing status/isActive untouched rather than resetting
-              // it to a default.
-              status: record.status ?? warehouse.status,
-              isActive: record.status ? record.status === "ACTIVE" : warehouse.isActive,
-            },
-          });
-          await this.upsertSourceStorageUnit(tx, warehouse.id, record);
+          const nextName = record.name ?? warehouse.name;
+          const nextType = record.storageType ?? warehouse.warehouseType;
+          const nextState = record.location.state ?? warehouse.state;
+          const nextDistrict = record.location.district ?? warehouse.district;
+          const nextAddress = record.location.address ?? warehouse.address;
+          const nextPincode = record.location.pincode ?? warehouse.pincode;
+          const nextLatitude = record.location.latitude ?? warehouse.latitude;
+          const nextLongitude = record.location.longitude ?? warehouse.longitude;
+          // Same "only overwrite with what THIS fetch actually
+          // supplied" rule as every other field above: a source that
+          // reported no status this run leaves the warehouse's
+          // existing status/isActive untouched rather than resetting
+          // it to a default.
+          const nextStatus = record.status ?? warehouse.status;
+          const nextIsActive = record.status ? record.status === "ACTIVE" : warehouse.isActive;
+
+          // Compare against what's already stored before issuing a
+          // write. A full daily fetch of a mostly-static government
+          // dataset means the overwhelming majority of records will be
+          // byte-for-byte identical to last time — those must not cause
+          // an UPDATE statement, only bookkeeping (Part 7 of the
+          // ingestion spec: "do not perform unnecessary database UPDATE
+          // operations when the incoming data is identical").
+          warehouseChanged =
+            warehouse.name !== nextName ||
+            warehouse.warehouseType !== nextType ||
+            warehouse.state !== nextState ||
+            warehouse.district !== nextDistrict ||
+            warehouse.address !== nextAddress ||
+            warehouse.pincode !== nextPincode ||
+            !valuesEqual(warehouse.latitude, nextLatitude) ||
+            !valuesEqual(warehouse.longitude, nextLongitude) ||
+            warehouse.status !== nextStatus ||
+            warehouse.isActive !== nextIsActive;
+
+          if (warehouseChanged) {
+            await tx.warehouse.update({
+              where: { id: warehouse.id },
+              data: {
+                name: nextName,
+                warehouseType: nextType,
+                state: nextState,
+                district: nextDistrict,
+                address: nextAddress,
+                pincode: nextPincode,
+                latitude: nextLatitude,
+                longitude: nextLongitude,
+                status: nextStatus,
+                isActive: nextIsActive,
+              },
+            });
+          }
+          storageChanged = await this.upsertSourceStorageUnit(tx, warehouse.id, record);
         }
 
+        // Sync bookkeeping (lastSyncedAt/sourceUpdatedAt/metadata) is
+        // always refreshed regardless of whether the warehouse's own
+        // fields changed — "FarmLink last successfully processed this
+        // source record" is true on every run, changed or not.
         await this.sourceReferences.update(
           existingReference.id,
           {
@@ -327,7 +381,10 @@ export class WarehouseSyncService {
           },
           tx,
         );
-        return "UPDATED";
+        // No warehouse row to compare against (an orphaned/deleted
+        // source reference target) is treated conservatively as
+        // "updated", never as a confident "unchanged".
+        return warehouse && !warehouseChanged && !storageChanged ? "UNCHANGED" : "UPDATED";
       }
 
       const duplicate = await this.duplicateDetection.detect(record);
@@ -408,13 +465,17 @@ export class WarehouseSyncService {
    * record has none this time, an existing unit is left untouched rather
    * than zeroed out (Part 16 — a provider temporarily omitting a field is
    * not the same fact as the warehouse no longer having capacity).
+   *
+   * Returns whether a write was actually issued (created, or an existing
+   * unit's fields genuinely differed) — used by persistOne to decide
+   * between the "updated" and "unchanged" outcomes.
    */
   private async upsertSourceStorageUnit(
     tx: Prisma.TransactionClient,
     warehouseId: string,
     record: ReturnType<typeof normalizeExternalWarehouseRecord>,
-  ): Promise<void> {
-    if (!record.capacity || record.capacity.totalKg === null) return;
+  ): Promise<boolean> {
+    if (!record.capacity || record.capacity.totalKg === null) return false;
 
     const totalCapacity = record.capacity.totalKg;
     const availableCapacity = record.capacity.availableKg ?? totalCapacity;
@@ -424,19 +485,34 @@ export class WarehouseSyncService {
     });
 
     if (existing) {
+      const nextStorageType = record.storageType ?? existing.storageType;
+      const nextTemperatureControlled = record.temperatureControlled ?? existing.temperatureControlled;
+      const nextMinTemperature = record.minTemperatureC ?? existing.minTemperature;
+      const nextMaxTemperature = record.maxTemperatureC ?? existing.maxTemperature;
+
+      const changed =
+        existing.storageType !== nextStorageType ||
+        !valuesEqual(existing.totalCapacity, totalCapacity) ||
+        !valuesEqual(existing.availableCapacity, availableCapacity) ||
+        existing.temperatureControlled !== nextTemperatureControlled ||
+        !valuesEqual(existing.minTemperature, nextMinTemperature) ||
+        !valuesEqual(existing.maxTemperature, nextMaxTemperature);
+
+      if (!changed) return false;
+
       await tx.warehouseStorageUnit.update({
         where: { id: existing.id },
         data: {
-          storageType: record.storageType ?? existing.storageType,
+          storageType: nextStorageType,
           totalCapacity,
           availableCapacity,
           capacityUnit: "KG",
-          temperatureControlled: record.temperatureControlled ?? existing.temperatureControlled,
-          minTemperature: record.minTemperatureC ?? existing.minTemperature,
-          maxTemperature: record.maxTemperatureC ?? existing.maxTemperature,
+          temperatureControlled: nextTemperatureControlled,
+          minTemperature: nextMinTemperature,
+          maxTemperature: nextMaxTemperature,
         },
       });
-      return;
+      return true;
     }
 
     await tx.warehouseStorageUnit.create({
@@ -452,5 +528,19 @@ export class WarehouseSyncService {
         maxTemperature: record.maxTemperatureC,
       },
     });
+    return true;
   }
+}
+
+/**
+ * Loose equality that treats a Prisma `Decimal` (or its string/number
+ * serialization) as equal to a plain JS number with the same numeric
+ * value — `totalCapacity`/`minTemperature`/etc. come back as `Decimal`
+ * from a real Postgres query but as plain numbers in the in-memory test
+ * double, and `null`/`undefined` must never be coerced into `0` here.
+ */
+function valuesEqual(existing: unknown, next: number | null | undefined): boolean {
+  if (next === null || next === undefined) return existing === null || existing === undefined;
+  if (existing === null || existing === undefined) return false;
+  return Number(existing) === Number(next);
 }

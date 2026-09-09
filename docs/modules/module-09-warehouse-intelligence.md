@@ -1903,3 +1903,198 @@ Files changed:
 NABARD, frontend warehouse UI, warehouse map UI, and cross-provider
 geospatial matching — none were touched, exactly as instructed.
 
+## Warehouse Ecosystem Ingestion Layer — daily FCI/IISFM sync + `unchanged` tracking (this task)
+
+This task's own instructions were to inspect and reuse the existing
+ingestion pipeline, not redesign it — and after inspection, the FCI/IISFM
+provider, mapper, `WarehouseSyncService`, duplicate detection, and manual
+admin sync endpoint documented above already satisfied nearly every
+requirement (identity via `providerId + externalId`, update-not-recreate,
+never fabricating `sourceUpdatedAt`, never touching FarmLink-owned rows,
+per-record failure isolation). Two things were actually missing:
+
+1. **No automatic cron existed at all.** The only way to run a warehouse
+   sync was the existing `POST /api/admin/warehouses/sync` admin endpoint.
+2. **No `unchanged` outcome.** `WarehouseSyncService.persistOne()`
+   unconditionally issued a `warehouse.update()` (and counted it as
+   `updated`) for every record whose `WarehouseSourceReference` already
+   existed — even when the incoming data was byte-for-byte identical to
+   what was already stored. This directly contradicts the ingestion
+   spec's "do not perform unnecessary database UPDATE operations when the
+   incoming data is identical" requirement, and its "the sync result
+   should distinguish created/updated/unchanged" requirement.
+
+### What changed
+
+**`warehouse-sync.service.ts`** — `persistOne()` now compares every field
+it would write (name, warehouseType, state, district, address, pincode,
+latitude, longitude, status, isActive) and the source-owned storage
+unit's fields (storageType, totalCapacity, availableCapacity,
+temperatureControlled, minTemperature, maxTemperature) against what's
+already stored, using a small `valuesEqual()` helper that treats a
+Prisma `Decimal` and a plain number with the same numeric value as equal.
+A `tx.warehouse.update()` / `tx.warehouseStorageUnit.update()` is now only
+issued when something actually differs. `WarehouseSourceReference`
+bookkeeping (`lastSyncedAt`, `sourceUpdatedAt`, `metadata`) is still
+refreshed unconditionally on every run, changed or not — "FarmLink last
+successfully processed this source record" is true regardless of whether
+the record's own data moved. `ProviderSyncSummary`/`WarehouseSyncSummary`
+gained an `unchanged: number` field alongside `created`/`updated`. A
+record whose Warehouse row is missing entirely (an orphaned source
+reference — not expected in practice) is conservatively still reported as
+`updated`, never a confident `unchanged`.
+
+**`warehouse-sync-cron.guard.ts` (new)** — two small, pure,
+dependency-free pieces extracted so the required environment/concurrency
+behavior is independently unit-testable without exercising the whole
+`server.ts` composition root (which — like the existing market-data cron
+it sits next to — has no test coverage of its own):
+
+- `decideWarehouseSyncCronScheduling({ isProduction, governmentProviderEnabled })`
+  — the yes/no decision of whether to call `cron.schedule` at all. Returns
+  `{ schedule: true }` only when both conditions hold; otherwise
+  `{ schedule: false, reason: "NOT_PRODUCTION" | "PROVIDER_DISABLED" }`.
+  `server.ts` evaluates this once at startup, *before* `cron.schedule` is
+  ever called — so development/test never registers a scheduled task,
+  rather than registering one and returning early inside the callback.
+- `withRedisLock(redis, key, ttlMs, fn)` — acquires the lock with
+  `SET key value PX ttlMs NX` (same primitive the existing market-data
+  cron already uses), runs `fn` only if acquired, and releases the lock
+  in a `finally` — but only if the value it reads back is still the token
+  it itself wrote, so a run that outlives its own TTL can never delete a
+  different instance's newer lock. A `null` Redis client (no `REDIS_URL`
+  configured, e.g. local development) always runs `fn` directly.
+
+**`server.ts`** — added the automatic daily sync, built from the same
+`WarehouseProviderRegistry`/`FciIisfmWarehouseProvider`/
+`WarehouseDuplicateDetectionService`/`WarehouseSyncService` pieces
+`app.ts` already wires for the manual admin endpoint (there is exactly
+one warehouse persistence algorithm; the cron only decides *when* to call
+it — mirrors how the existing market-data cron reuses `MarketDataService`
+rather than duplicating its logic). Scheduled via `node-cron` at
+`30 2 * * *` (02:30) with `timezone: "Asia/Kolkata"`, gated by
+`decideWarehouseSyncCronScheduling`, locked via `withRedisLock` with the
+same `warehouse-data:sync-lock` key style as `market-data:sync-lock`, and
+its `ScheduledTask.stop()` is added to the existing `shutdown()` handler
+alongside `marketSyncTask`. Startup/skip/failure are logged distinctly
+("Warehouse sync cron scheduled for 02:30 Asia/Kolkata" /
+"...not scheduled outside production" / "...not scheduled because
+government provider is disabled" / "Warehouse sync skipped: another
+instance owns the lock" / sync-completed totals / sync-failed + captured
+exception) per the spec's observability requirements. No admin-sync
+behavior changed — `WarehouseSyncService`, the registry, and
+`/api/admin/warehouses/sync` are completely untouched by this addition.
+
+### Why no schema/migration changes
+
+None were needed. `unchanged` is a summary-response concept only, not
+persisted anywhere; the cron needs no new table (it reuses the existing
+`WarehouseSourceReference`/`Warehouse`/`WarehouseStorageUnit` rows and the
+existing Redis connection). This matches the spec's own "no unnecessary
+database/schema redesign" acceptance criterion.
+
+### Tests added/changed
+
+- `warehouse-sync-cron.guard.test.ts` (new, 9 tests): all four
+  production × provider-enabled combinations for
+  `decideWarehouseSyncCronScheduling` (spec Tests 9–11), plus
+  `withRedisLock` acquiring/releasing normally, refusing to run when
+  another instance holds the lock (spec Test 12 — concurrent sync),
+  releasing on a thrown error, running directly with no Redis configured,
+  and never deleting a lock it didn't itself acquire.
+- `warehouse-sync.service.test.ts` — the existing idempotency test
+  previously asserted `updated: 1` on an identical second run; corrected
+  to assert `unchanged: 1, updated: 0` (spec Test 3). Added: a spy-based
+  test proving no `warehouse.update`/`warehouseStorageUnit.update`/
+  `.create` call is issued for an identical re-fetch; a test that
+  `lastSyncedAt` still advances on an unchanged record; a test that a
+  *genuine* capacity change is still correctly counted as `updated`, not
+  `unchanged`.
+- `wdra-import-pipeline.test.ts` — one existing test asserted
+  `updated: 1` for a duplicate-within-one-file row whose only difference
+  was a `Remarks` value that lands in `WarehouseSourceReference.metadata`,
+  never on the `Warehouse` row itself; corrected to assert
+  `updated: 0, unchanged: 1`, since that row's warehouse-facing data truly
+  didn't change.
+
+### Verification actually run
+
+- **`npm install`**: succeeded (631 packages).
+- **`npx prisma generate`**: fails in this sandbox — `binaries.prisma.sh`
+  is blocked by network egress rules here, so no real generated Prisma
+  Client (with actual model types) exists; only the default stub. This is
+  the same pre-existing sandbox limitation this document already noted
+  for the WDRA/FCI work above, not something introduced by this change.
+- **`npx tsc --noEmit`**: the only errors touching the two files this
+  task modified (`warehouse-sync.service.ts`) are the same pre-existing
+  `"@prisma/client" has no exported member 'WarehouseSourceType'/
+  'InputJsonValue'/'JsonNull'` class of error already present throughout
+  this module (Prisma-stub limitation, not a regression — verified by
+  confirming these exact call sites existed, unchanged, before this
+  task's edits). `server.ts` and the new `warehouse-sync-cron.guard.ts`
+  produce zero errors.
+- **`npx eslint`** on every changed file: 0 errors. Only pre-existing
+  `@typescript-eslint/no-explicit-any` warnings in the two test files,
+  identical in kind to warnings the untouched parts of those same files
+  already had (the fake-Prisma test doubles use `any` throughout, as
+  before).
+- **`npm test` (full suite)**: 753 of 770 passing (up from a measured
+  baseline of 741 of 758 before this task's changes — i.e. the 12 new
+  tests, all passing, with zero regressions). The same 4 suites fail
+  before and after this task's changes, for the same reasons, confirmed
+  by re-running the untouched baseline first:
+  `sell-store-orchestration.service.test.ts` and
+  `buyer-matching.service.test.ts` (`Prisma.Decimal is not a constructor`
+  — the Prisma-stub limitation above), `warehouse-recommendation.service.test.ts`
+  (a pre-existing ranking-order assertion in a file this task never
+  touches), and `wdra-csv-parser.test.ts` (looks for a fixture CSV at
+  `data/wdra/wdra-warehouses.csv` that isn't present in this checkout).
+- **Manual admin sync**: unchanged code path, exercised indirectly by the
+  full `warehouse-sync.service.test.ts` suite (still 19/19 passing) since
+  the admin controller/route call the identical `WarehouseSyncService`.
+- **No live FCI/IISFM request was made** — `WAREHOUSE_GOVERNMENT_PROVIDER_ENABLED`
+  stays `false` by default in `.env.example`, and this task made no
+  outbound call to `api.iisfm.nic.in`, consistent with "do not require
+  developers to accidentally hit the real FCI API".
+
+### Report
+
+```text
+Files changed:
+  backend/src/modules/warehouse-intelligence/warehouse-sync.service.ts (modified: + unchanged tracking, no unnecessary UPDATE on identical data)
+  backend/src/modules/warehouse-intelligence/warehouse-sync-cron.guard.ts (new: pure scheduling decision + Redis lock helper)
+  backend/src/server.ts (modified: + automatic daily warehouse sync cron, production+provider-gated, Redis-locked, graceful shutdown)
+  backend/tests/unit/warehouse-sync-cron.guard.test.ts (new, 9 tests)
+  backend/tests/unit/warehouse-sync.service.test.ts (modified: idempotency test corrected + 3 new unchanged/updated tests)
+  backend/tests/unit/wdra-import-pipeline.test.ts (modified: duplicate-row test corrected for the new unchanged outcome)
+  docs/modules/module-09-warehouse-intelligence.md (this section)
+
+What was implemented:
+  - unchanged/updated/created distinction in WarehouseSyncService.persistOne(), backed by field-level comparison against the stored Warehouse + WarehouseStorageUnit rows
+  - Automatic daily FCI/IISFM warehouse sync cron (30 2 * * * Asia/Kolkata), reusing the existing WarehouseSyncService/provider registry — no second persistence algorithm
+  - Production-only + provider-enabled cron gating, decided before cron.schedule is ever called
+  - Redis distributed lock (warehouse-data:sync-lock) preventing concurrent multi-instance sync runs, with safe TTL and never releasing another instance's lock
+  - Graceful shutdown stops the new scheduled task alongside the existing market-data one
+
+Cron behavior:
+  - NODE_ENV=production + WAREHOUSE_GOVERNMENT_PROVIDER_ENABLED=true -> scheduled, runs daily 02:30 Asia/Kolkata
+  - NODE_ENV=development or test (any provider setting) -> not scheduled
+  - NODE_ENV=production + WAREHOUSE_GOVERNMENT_PROVIDER_ENABLED=false -> not scheduled
+  - Manual admin sync (POST /api/admin/warehouses/sync) unaffected in every case
+
+Database synchronization behavior:
+  - New FCI depot (providerId=fci-iisfm, externalId=Depot Code) -> Warehouse + WarehouseSourceReference created
+  - Existing depot, data changed -> same Warehouse row updated, no new row
+  - Existing depot, data identical -> no Warehouse/WarehouseStorageUnit UPDATE issued; counted as `unchanged`; WarehouseSourceReference.lastSyncedAt still refreshed
+  - FCI API failure -> existing warehouses untouched, sync marked failed for that provider, other providers unaffected
+  - Warehouse missing from a given day's FCI response -> never deleted/deactivated (no code path does this)
+
+Tests run: npm test -> 753/770 passing (12 new, all passing; same 4 pre-existing unrelated failures as the measured baseline, 0 regressions)
+Build/typecheck result: npx tsc --noEmit clean on server.ts and warehouse-sync-cron.guard.ts; warehouse-sync.service.ts shows only the same pre-existing Prisma-stub errors already present before this task
+Lint result: npx eslint 0 errors on all changed files
+
+Assumptions or unresolved issues:
+  - No live Postgres or reachable FCI/IISFM endpoint in this sandbox, so the cron's real behavior against production data/API is unverified beyond the in-memory unit tests (same limitation already documented for the original FCI provider work above)
+  - No git commit or push was made, per this task's explicit instruction
+```
+
