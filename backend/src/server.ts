@@ -1,8 +1,11 @@
 import { createApp } from "./app";
 import { env } from "./config/env";
 import { logger } from "./config/logger";
-import { captureException, initSentry } from "./config/sentry";
+import { initSentry } from "./config/sentry";
 import { prisma } from "./config/prisma";
+import { registerMarketSeedJob } from "./jobs/market-seed.job";
+import { registerMarketSyncJob } from "./jobs/market-sync.job";
+import { registerWarehouseSyncJob } from "./jobs/warehouse-sync.job";
 import { PrismaAuthRepository } from "./modules/auth/auth.repository";
 import { PrismaAuditService } from "./modules/audit/audit.service";
 import { PrismaReferenceDataRepository } from "./modules/reference-data/reference-data.repository";
@@ -15,10 +18,7 @@ import { PrismaFpoMembershipRepository } from "./modules/fpo/membership.reposito
 import { PrismaAggregationGroupRepository } from "./modules/fpo/aggregation.repository";
 import { PrismaCropLotRepository } from "./modules/lots/lots.repository";
 import { PrismaQualityRepository, PrismaQualityStandardRepository } from "./modules/quality/quality.repository";
-import cron, { ScheduledTask } from "node-cron";
-import { getRedis } from "./config/redis";
-import { DataGovMarketProvider } from "./modules/market-data/data-gov.provider";
-import { MarketDataService } from "./modules/market-data/market-data.service";
+import type { ScheduledTask } from "node-cron";
 
 async function main() {
   initSentry();
@@ -57,35 +57,13 @@ async function main() {
   await prisma.$connect();
   logger.info("Database connection established");
 
-  let marketSyncTask: ScheduledTask | null = null;
-  const provider = new DataGovMarketProvider();
-  if (env.MARKET_SYNC_ENABLED && provider.configured) {
-    marketSyncTask = cron.schedule("0 2 * * *", async () => {
-      const redis = getRedis(); const lockKey = "market-data:sync-lock"; const token = `${process.pid}:${Date.now()}`;
-      try {
-        if (redis && (await redis.set(lockKey, token, "PX", 30 * 60_000, "NX")) !== "OK") { logger.info("Market sync skipped: another instance owns the lock"); return; }
-        const checkpoint = await prisma.marketDataSyncCheckpoint.findUnique({ where: { source: "data.gov.in" } });
-        const sevenDaysAgo = new Date(); sevenDaysAgo.setUTCDate(sevenDaysAgo.getUTCDate() - 7);
-        // Catch-up is always bounded to the last 7 days — never a silent
-        // unbounded historical backfill. If the checkpoint is older than
-        // that, the days between the checkpoint and sevenDaysAgo are a real
-        // coverage gap that this sync will NOT fill; record it explicitly
-        // (audit + log) rather than letting it pass unnoticed.
-        if (checkpoint?.lastSuccessfulObservedDate && checkpoint.lastSuccessfulObservedDate < sevenDaysAgo) {
-          const gapDays = Math.floor((sevenDaysAgo.getTime() - checkpoint.lastSuccessfulObservedDate.getTime()) / 86_400_000);
-          logger.warn({ lastSuccessfulObservedDate: checkpoint.lastSuccessfulObservedDate, gapDays }, "Market sync checkpoint gap exceeds the 7-day catch-up window; older data will not be backfilled automatically");
-          await auditService.record({ action: "MARKET_DATA_SYNC_GAP_DETECTED", entityType: "MarketDataSyncCheckpoint", entityId: "data.gov.in", metadata: { lastSuccessfulObservedDate: checkpoint.lastSuccessfulObservedDate.toISOString(), gapDays } });
-        }
-        const from = checkpoint?.lastSuccessfulObservedDate && checkpoint.lastSuccessfulObservedDate > sevenDaysAgo ? checkpoint.lastSuccessfulObservedDate : sevenDaysAgo;
-        const result = await new MarketDataService(prisma).run(provider.records(from), "data.gov.in", "INCREMENTAL_SYNC");
-        if (result.newestObservedDate) await prisma.marketDataSyncCheckpoint.upsert({ where: { source: "data.gov.in" }, create: { source: "data.gov.in", lastSuccessfulObservedDate: result.newestObservedDate, lastSuccessfulSyncAt: new Date() }, update: { lastSuccessfulObservedDate: result.newestObservedDate, lastSuccessfulSyncAt: new Date() } });
-        await auditService.record({ action: "MARKET_DATA_SYNCED", entityType: "MarketDataImportRun", entityId: result.runId, metadata: { imported: result.imported, rejected: result.rejected } });
-        logger.info({ result }, "Market data sync completed");
-      } catch (err) { captureException(err, { module: "market_intelligence", operation: "sync" }); logger.error({ err }, "Market data sync failed"); }
-      finally { if (redis && await redis.get(lockKey) === token) await redis.del(lockKey); }
-    }, { timezone: "Asia/Kolkata" });
-    logger.info("Market data sync scheduled for 02:00 Asia/Kolkata");
-  }
+  // All scheduled cron jobs live in ./jobs — each `register*Job` decides
+  // for itself whether it should actually schedule anything (env flags,
+  // provider configuration, production-only guards) and returns the
+  // ScheduledTask (or null) so shutdown() can stop it cleanly.
+  const marketSeedTask: ScheduledTask | null = registerMarketSeedJob({ prisma, auditService });
+  const marketSyncTask: ScheduledTask | null = registerMarketSyncJob({ prisma, auditService });
+  const warehouseSyncTask: ScheduledTask | null = registerWarehouseSyncJob({ prisma, auditService });
 
   const server = app.listen(env.PORT, () => {
     logger.info(`FarmLink auth service listening on ${env.BACKEND_URL} (port ${env.PORT})`);
@@ -94,7 +72,9 @@ async function main() {
 
   async function shutdown(signal: string) {
     logger.info(`${signal} received — shutting down gracefully`);
+    marketSeedTask?.stop();
     marketSyncTask?.stop();
+    warehouseSyncTask?.stop();
     server.close(async () => {
       await prisma.$disconnect();
       process.exit(0);
