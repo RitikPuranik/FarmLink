@@ -3,6 +3,7 @@ import { env } from "./config/env";
 import { logger } from "./config/logger";
 import { initSentry } from "./config/sentry";
 import { prisma } from "./config/prisma";
+import { registerMarketSeedJob } from "./jobs/market-seed.job";
 import { registerMarketSyncJob } from "./jobs/market-sync.job";
 import { registerWarehouseSyncJob } from "./jobs/warehouse-sync.job";
 import { PrismaAuthRepository } from "./modules/auth/auth.repository";
@@ -60,6 +61,7 @@ async function main() {
   // for itself whether it should actually schedule anything (env flags,
   // provider configuration, production-only guards) and returns the
   // ScheduledTask (or null) so shutdown() can stop it cleanly.
+  const marketSeedTask: ScheduledTask | null = registerMarketSeedJob({ prisma, auditService });
   const marketSyncTask: ScheduledTask | null = registerMarketSyncJob({ prisma, auditService });
   const warehouseSyncTask: ScheduledTask | null = registerWarehouseSyncJob({ prisma, auditService });
 
@@ -70,6 +72,7 @@ async function main() {
 
   async function shutdown(signal: string) {
     logger.info(`${signal} received — shutting down gracefully`);
+    marketSeedTask?.stop();
     marketSyncTask?.stop();
     warehouseSyncTask?.stop();
     server.close(async () => {
