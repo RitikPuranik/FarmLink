@@ -1,4 +1,4 @@
-import { decideWarehouseSyncCronScheduling, withRedisLock, RedisLockClient } from "../../src/modules/warehouse-intelligence/warehouse-sync-cron.guard";
+import { decideWarehouseSyncCronScheduling, withRedisLock, RedisLockClient } from "../../src/jobs/warehouse-sync-cron.guard";
 
 /** In-memory stand-in for the one ioredis surface withRedisLock touches —
  * enough to exercise real NX-acquire/TTL/release semantics without a real
