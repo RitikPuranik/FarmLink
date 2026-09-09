@@ -44,6 +44,7 @@
     "rate-limit-redis": "^4.2.0",
     "swagger-jsdoc": "^6.2.8",
     "swagger-ui-express": "^5.0.1",
+    "tsx": "^4.19.1",
     "uuid": "^9.0.1",
     "xlsx": "^0.18.5",
     "zod": "^3.23.8"
@@ -70,7 +71,6 @@
     "prisma": "^5.20.0",
     "supertest": "^7.0.0",
     "ts-jest": "^29.2.5",
-    "tsx": "^4.19.1",
     "typescript": "^5.6.2"
   }
 }
