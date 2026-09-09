@@ -4,6 +4,16 @@ import { SourceMarketRecord } from "./market-data.service";
 
 const sleep = (ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms));
 
+/** Parse dates in DD/MM/YYYY or YYYY-MM-DD format (data.gov.in uses the former). */
+function parseDateString(raw: string): Date {
+  const trimmed = raw.trim();
+  // DD/MM/YYYY or DD-MM-YYYY
+  const dmy = trimmed.match(/^(\d{1,2})[\/-](\d{1,2})[\/-](\d{4})$/);
+  if (dmy) return new Date(`${dmy[3]}-${dmy[2].padStart(2, "0")}-${dmy[1].padStart(2, "0")}T00:00:00.000Z`);
+  // Fallback for ISO / other formats
+  return new Date(trimmed);
+}
+
 /** Provider adapter: keeps data.gov.in response conventions outside domain code. */
 export class DataGovMarketProvider {
   get configured() { return Boolean(env.MARKET_DATA_GOV_API_KEY && env.MARKET_DATA_GOV_RESOURCE_ID); }
@@ -29,36 +39,45 @@ export class DataGovMarketProvider {
         if (![408, 429, 500, 502, 503, 504].includes(response.status)) throw new MarketDomainError(`Provider request failed (${response.status}).`, "MARKET_DATA_PROVIDER_ERROR", 502);
         failure = new Error(`Transient provider response ${response.status}`);
       } catch (error) { failure = error; }
-      if (attempt < env.MARKET_DATA_GOV_MAX_RETRIES) await sleep((2 ** attempt) * 250);
+      if (attempt < env.MARKET_DATA_GOV_MAX_RETRIES) {
+        const delay = Math.max(1000, (2 ** attempt) * 1500);
+        await sleep(delay);
+      }
     }
     throw new MarketDomainError(failure instanceof Error ? failure.message : "Market data provider is unavailable.", "MARKET_DATA_PROVIDER_ERROR", 502);
   }
 
-  async *records(from?: Date): AsyncGenerator<SourceMarketRecord> {
+  async *records(from?: Date, maxRecords?: number): AsyncGenerator<SourceMarketRecord> {
     if (!this.configured) return;
     let offset = 0;
+    let yielded = 0;
     for (;;) {
       const rows = await this.fetchPage(offset, from);
       for (const row of rows) {
         const text = (...keys: string[]) => keys.map((key) => row[key]).find((value) => value !== undefined && value !== null && value !== "") ?? "";
         const number = (...keys: string[]) => Number(text(...keys));
-        const date = text("arrival_date", "date");
+        const date = text("Arrival_Date", "arrival_date", "date");
         if (!date) continue; // persisted importer diagnostics handle all other malformed rows.
+        const observedDate = parseDateString(date);
+        if (isNaN(observedDate.getTime())) continue;
         yield {
           source: "data.gov.in",
           sourceRecordId: text("id", "_id") || undefined,
-          observedDate: new Date(date),
-          commodity: text("commodity", "crop"),
+          observedDate,
+          commodity: text("Commodity", "commodity", "crop"),
           marketId: text("market_id", "market_code") || undefined,
-          mandiName: text("market", "mandi"),
-          state: text("state"), district: text("district"),
-          minPrice: number("min_price", "minPrice"), maxPrice: number("max_price", "maxPrice"), modalPrice: number("modal_price", "modalPrice"),
+          mandiName: text("Market", "market", "mandi"),
+          state: text("State", "state"), district: text("District", "district"),
+          minPrice: number("Min_Price", "min_price", "minPrice"), maxPrice: number("Max_Price", "max_price", "maxPrice"), modalPrice: number("Modal_Price", "modal_price", "modalPrice"),
           priceUnit: "QTL", arrivals: null, metadata: { resourceId: env.MARKET_DATA_GOV_RESOURCE_ID, offset },
         };
+        yielded++;
+        if (maxRecords && yielded >= maxRecords) return;
       }
       if (rows.length < env.MARKET_DATA_GOV_PAGE_SIZE) break;
       offset += rows.length;
-      if (env.MARKET_DATA_GOV_RATE_LIMIT_MS) await sleep(env.MARKET_DATA_GOV_RATE_LIMIT_MS);
+      const interPageDelay = Math.max(1000, env.MARKET_DATA_GOV_RATE_LIMIT_MS || 1500);
+      await sleep(interPageDelay);
     }
   }
 }

@@ -107,8 +107,12 @@ export class FciIisfmWarehouseProvider implements WarehouseDataProvider {
     let droppedForMissingCode = 0;
     for (const depot of rawDepots) {
       const mapped = mapFciDepotToExternalRecord(depot);
-      if (mapped) warehouses.push(mapped);
-      else droppedForMissingCode += 1;
+      if (mapped) {
+        warehouses.push(mapped);
+        if (_request.maxRecords && warehouses.length >= _request.maxRecords) break;
+      } else {
+        droppedForMissingCode += 1;
+      }
     }
 
     const status: WarehouseProviderStatus =

@@ -70,6 +70,15 @@ function firstDefined(row: Record<string, unknown>, keys: string[]): unknown {
   for (const key of keys) {
     if (row[key] !== undefined && row[key] !== null && row[key] !== "") return row[key];
   }
+  // Case-insensitive & symbol-insensitive fallback for resilient mapping
+  const rowKeys = Object.keys(row);
+  for (const key of keys) {
+    const target = key.toLowerCase().replace(/[\s_]/g, "");
+    const matchedKey = rowKeys.find((k) => k.toLowerCase().replace(/[\s_]/g, "") === target);
+    if (matchedKey && row[matchedKey] !== undefined && row[matchedKey] !== null && row[matchedKey] !== "") {
+      return row[matchedKey];
+    }
+  }
   return undefined;
 }
 
@@ -80,13 +89,13 @@ function textOf(row: Record<string, unknown>, keys: string[]): string | null {
   return text.length ? text : null;
 }
 
-const DEPOT_CODE_KEYS = ["Depot Code", "DepotCode", "depotCode", "depot_code", "DEPOT_CODE", "depotcode", "Code", "code"];
-const DEPOT_NAME_KEYS = ["Depot Name", "DepotName", "depotName", "depot_name", "DEPOT_NAME", "depotname", "Name", "name"];
-const REVENUE_STATE_KEYS = ["Revenue State", "RevenueState", "revenueState", "revenue_state", "REVENUE_STATE", "State", "state"];
-const REVENUE_DISTRICT_KEYS = ["Revenue District", "RevenueDistrict", "revenueDistrict", "revenue_district", "REVENUE_DISTRICT", "District", "district"];
-const TOTAL_CAPACITY_KEYS = ["Total Capacity", "TotalCapacity", "totalCapacity", "total_capacity", "TOTAL_CAPACITY"];
-const COVERED_CAPACITY_KEYS = ["Covered Capacity", "CoveredCapacity", "coveredCapacity", "covered_capacity", "COVERED_CAPACITY"];
-const OPEN_CAPACITY_KEYS = ["Open Capacity", "OpenCapacity", "openCapacity", "open_capacity", "OPEN_CAPACITY"];
+const DEPOT_CODE_KEYS = ["Depot_Code", "Depot Code", "DepotCode", "depotCode", "depot_code", "DEPOT_CODE", "depotcode", "Code", "code"];
+const DEPOT_NAME_KEYS = ["Depot_Name", "Depot Name", "DepotName", "depotName", "depot_name", "DEPOT_NAME", "depotname", "Name", "name"];
+const REVENUE_STATE_KEYS = ["RevenueStateName", "Revenue State", "RevenueState", "revenueState", "revenue_state", "REVENUE_STATE", "State", "state"];
+const REVENUE_DISTRICT_KEYS = ["RevenueDistrict", "Revenue District", "revenueDistrict", "revenue_district", "REVENUE_DISTRICT", "District", "district"];
+const TOTAL_CAPACITY_KEYS = ["TotCap", "Total Capacity", "TotalCapacity", "totalCapacity", "total_capacity", "TOTAL_CAPACITY"];
+const COVERED_CAPACITY_KEYS = ["CapCovered", "Covered Capacity", "CoveredCapacity", "coveredCapacity", "covered_capacity", "COVERED_CAPACITY"];
+const OPEN_CAPACITY_KEYS = ["CapOpen", "Open Capacity", "OpenCapacity", "openCapacity", "open_capacity", "OPEN_CAPACITY"];
 // No unit field is documented for this endpoint. Rather than assume MT
 // (a reasonable but unconfirmed domain guess), this mapper only ever
 // treats a capacity as having a resolvable unit if the response itself

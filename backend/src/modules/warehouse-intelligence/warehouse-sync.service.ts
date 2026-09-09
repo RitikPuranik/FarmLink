@@ -118,7 +118,7 @@ export class WarehouseSyncService {
     private readonly auditService: AuditService,
   ) {}
 
-  async run(options: { updatedSince?: Date; actorUserId?: string } = {}): Promise<WarehouseSyncSummary> {
+  async run(options: { updatedSince?: Date; actorUserId?: string; maxRecords?: number } = {}): Promise<WarehouseSyncSummary> {
     const runId = crypto.randomUUID();
     const startedAt = new Date();
 
@@ -130,7 +130,7 @@ export class WarehouseSyncService {
     });
     trackEvent("warehouse_provider_sync_requested", options.actorUserId ?? "system", { runId });
 
-    const providerResults = await this.registry.fetchAll({ updatedSince: options.updatedSince });
+    const providerResults = await this.registry.fetchAll({ updatedSince: options.updatedSince, maxRecords: options.maxRecords });
 
     const providerSummaries: ProviderSyncSummary[] = [];
     for (const result of providerResults) {
@@ -264,6 +264,11 @@ export class WarehouseSyncService {
         else if (outcome === "CREATED_POSSIBLE_DUPLICATE") {
           created += 1;
           duplicatesFlagged += 1;
+        }
+
+        const processed = created + updated + unchanged + linked + skipped + failed;
+        if (records.length > 50 && (processed % 200 === 0 || processed === records.length)) {
+          console.log(`   [${provider.id}] Processed ${processed}/${records.length} records (${created} created, ${updated} updated, ${unchanged} unchanged)...`);
         }
       } catch (err) {
         failed += 1;
@@ -456,7 +461,7 @@ export class WarehouseSyncService {
       );
 
       return duplicate.state === "POSSIBLE_DUPLICATE" ? "CREATED_POSSIBLE_DUPLICATE" : "CREATED";
-    });
+    }, { timeout: 30_000, maxWait: 15_000 });
   }
 
   /**
@@ -539,7 +544,7 @@ export class WarehouseSyncService {
  * from a real Postgres query but as plain numbers in the in-memory test
  * double, and `null`/`undefined` must never be coerced into `0` here.
  */
-function valuesEqual(existing: unknown, next: number | null | undefined): boolean {
+function valuesEqual(existing: unknown, next: unknown): boolean {
   if (next === null || next === undefined) return existing === null || existing === undefined;
   if (existing === null || existing === undefined) return false;
   return Number(existing) === Number(next);
