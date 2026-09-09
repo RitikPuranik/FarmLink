@@ -89,11 +89,7 @@ function sumTotals(providers: ProviderSyncSummary[]): WarehouseSyncSummary["tota
       skipped: acc.skipped + p.skipped,
       failed: acc.failed + p.failed,
     }),
-<<<<<<< HEAD
-    { fetched: 0, created: 0, updated: 0, linked: 0, duplicatesFlagged: 0, skipped: 0, failed: 0 },
-=======
-    { fetched: 0, created: 0, updated: 0, unchanged: 0, linked: 0, duplicatesFlagged: 0, skipped: 0, failed: 0, warnings: 0 },
->>>>>>> c5b5723b4094f6b11a5d4b86304238110b74f4dd
+    { fetched: 0, created: 0, updated: 0, unchanged: 0, linked: 0, duplicatesFlagged: 0, skipped: 0, failed: 0 },
   );
 }
 
@@ -308,22 +304,6 @@ export class WarehouseSyncService {
         let warehouseChanged = false;
         let storageChanged = false;
         if (warehouse) {
-<<<<<<< HEAD
-          await tx.warehouse.update({
-            where: { id: warehouse.id },
-            data: {
-              name: record.name ?? warehouse.name,
-              warehouseType: record.storageType ?? warehouse.warehouseType,
-              state: record.location.state ?? warehouse.state,
-              district: record.location.district ?? warehouse.district,
-              address: record.location.address ?? warehouse.address,
-              pincode: record.location.pincode ?? warehouse.pincode,
-              latitude: record.location.latitude ?? warehouse.latitude,
-              longitude: record.location.longitude ?? warehouse.longitude,
-            },
-          });
-          await this.upsertSourceStorageUnit(tx, warehouse.id, record);
-=======
           const nextName = record.name ?? warehouse.name;
           const nextType = record.storageType ?? warehouse.warehouseType;
           const nextState = record.location.state ?? warehouse.state;
@@ -377,7 +357,6 @@ export class WarehouseSyncService {
             });
           }
           storageChanged = await this.upsertSourceStorageUnit(tx, warehouse.id, record);
->>>>>>> c5b5723b4094f6b11a5d4b86304238110b74f4dd
         }
 
         // Sync bookkeeping (lastSyncedAt/sourceUpdatedAt/metadata) is
@@ -443,6 +422,8 @@ export class WarehouseSyncService {
           pincode: record.location.pincode,
           latitude: record.location.latitude,
           longitude: record.location.longitude,
+          status: record.status ?? "ACTIVE",
+          isActive: record.status ? record.status === "ACTIVE" : true,
         },
       });
 

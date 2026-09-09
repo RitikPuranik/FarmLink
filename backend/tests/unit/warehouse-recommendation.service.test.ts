@@ -69,7 +69,7 @@ function fakeStorageRates(rates: any[] = []) {
 describe("WarehouseRecommendationService.recommend", () => {
   it("ranks two suitable candidates and excludes an unsuitable one", async () => {
     const near = warehouseRow({ publicId: "wh-near", latitude: 18.51, longitude: 73.81 });
-    const far = warehouseRow({ publicId: "wh-far", latitude: 19.5, longitude: 74.5 });
+    const far = warehouseRow({ publicId: "wh-far", latitude: 18.9, longitude: 74.2 });
     const bad = warehouseRow({ publicId: "wh-bad", latitude: 18.5, longitude: 73.8 });
 
     const analysisByWarehouse: Record<string, any> = {
