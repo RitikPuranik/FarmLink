@@ -10,6 +10,7 @@ import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import { Badge, toneForStatus } from "@/components/ui/badge";
 import { LoadingBlock } from "@/components/StateBlocks";
+import { FeatureTour } from "@/components/FeatureTour";
 import { fpoApi, membershipApi } from "@/services/fpoAdminApi";
 import { ApiRequestError } from "@/types/api";
 
@@ -68,7 +69,7 @@ function FindFpoCard() {
         <Search className="h-[18px] w-[18px]" aria-hidden /> Find an FPO to join
       </h2>
       {error && <Alert variant="error" className="mb-3">{error}</Alert>}
-      <Input placeholder="Search by FPO name…" value={search} onChange={(e) => setSearch(e.target.value)} />
+      <Input data-tour="fpo-search-field" placeholder="Search by FPO name…" value={search} onChange={(e) => setSearch(e.target.value)} />
 
       {search.length > 1 && (
         <div className="mt-4">
@@ -86,6 +87,7 @@ function FindFpoCard() {
                   </div>
                   <Button
                     variant="outline"
+                    data-tour="fpo-request-button"
                     className="w-auto px-3 py-2 text-sm"
                     disabled={requested === fpo.id}
                     isLoading={requestJoin.isPending && requestJoin.variables === fpo.id}
@@ -104,6 +106,11 @@ function FindFpoCard() {
 }
 
 function FpoMembershipContent() {
+  // Re-uses the ["fpo","mine"] cache MyFpoCard already fills — this is just
+  // to gate the tour on "does this farmer have no FPO yet", not a second
+  // network request.
+  const myFpoQuery = useQuery({ queryKey: ["fpo", "mine"], queryFn: () => membershipApi.myFpo(), retry: false });
+
   return (
     <div className="space-y-6">
       <PageHeader
@@ -112,6 +119,22 @@ function FpoMembershipContent() {
       />
       <MyFpoCard />
       <FindFpoCard />
+      <FeatureTour
+        tourId="join-fpo"
+        enabled={myFpoQuery.isError}
+        steps={[
+          {
+            target: "[data-tour='fpo-search-field']",
+            title: "Search for your FPO",
+            text: "Type your Farmer Producer Organisation's name here to find it.",
+          },
+          {
+            target: "[data-tour='fpo-request-button']",
+            title: "Send a request",
+            text: "Tap 'Request to join' — the FPO's admin will need to approve it before you become a member.",
+          },
+        ]}
+      />
     </div>
   );
 }

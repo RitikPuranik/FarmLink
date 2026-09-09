@@ -13,6 +13,7 @@ import { Input } from "@/components/ui/input";
 import { Label, FieldError, Alert } from "@/components/ui/primitives";
 import { RegisterFormValues, registerFormSchema } from "@/features/auth/auth.schemas";
 import { ApiRequestError } from "@/types/api";
+import { applyServerFieldErrors } from "@/lib/formErrors";
 
 const LANGUAGE_OPTIONS: { value: "en" | "hi" | "mr"; label: string }[] = [
   { value: "en", label: "English" },
@@ -29,6 +30,7 @@ export default function RegisterPage() {
   const {
     register,
     handleSubmit,
+    setError,
     formState: { errors, isSubmitting },
   } = useForm<RegisterFormValues>({
     resolver: zodResolver(registerFormSchema),
@@ -47,11 +49,15 @@ export default function RegisterPage() {
       });
       router.push("/login?registered=1");
     } catch (err) {
-      if (err instanceof ApiRequestError && err.fields) {
-        setServerError(Object.values(err.fields)[0] ?? err.message);
-      } else {
-        setServerError(err instanceof ApiRequestError ? err.message : t("common.networkError"));
-      }
+      const message = applyServerFieldErrors(err, setError, [
+        "fullName",
+        "mobile",
+        "email",
+        "password",
+        "confirmPassword",
+        "preferredLanguage",
+      ] as const);
+      setServerError(message ?? (err instanceof ApiRequestError ? null : t("common.networkError")));
     }
   }
 

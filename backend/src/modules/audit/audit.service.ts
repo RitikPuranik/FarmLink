@@ -75,12 +75,6 @@ export type AuditAction =
   // which is deploy-time, not an auditable in-app action.
   | "WAREHOUSE_PROVIDER_SYNC_INITIATED"
   | "WAREHOUSE_PROVIDER_SYNC_COMPLETED"
-  // WDRA CSV importer (wdra-csv-import.ts) — recorded once per CLI run,
-  // in addition to (not instead of) the WAREHOUSE_PROVIDER_SYNC_* events
-  // WarehouseSyncService.run() already emits for the "wdra" provider,
-  // since the importer wraps a whole CSV file's worth of rows into one
-  // sync run and this is the CSV-file-level record of that.
-  | "WDRA_IMPORT_COMPLETED"
   | "MARKET_RECOMMENDATION_GENERATED"
   // Module 7 — buyer verification, demand lifecycle and negotiations.
   | "BUYER_PROFILE_CREATED"

@@ -53,19 +53,6 @@ const envSchema = z.object({
   // loop — mirrors MARKET_DATA_GOV_PAGE_SIZE's role of keeping a single
   // sync run from opening one unbounded transaction.
   WAREHOUSE_SYNC_BATCH_SIZE: z.coerce.number().int().min(1).max(500).default(100),
-
-  // FCI/IISFM live government warehouse provider (fci-iisfm-warehouse-
-  // provider.ts) — the concrete implementation now sitting behind the
-  // WAREHOUSE_GOVERNMENT_PROVIDER_* flags above. Base URL and endpoint
-  // path are split (mirroring MARKET_DATA_GOV_BASE_URL/_RESOURCE_ID) so
-  // the endpoint path can change without touching the host. No API key
-  // variable is declared here — the public /DepotsWithCap endpoint is
-  // not documented as requiring one; if a real deployment's endpoint
-  // turns out to need a credential, that variable belongs next to this
-  // one, read only by fci-iisfm-warehouse-provider.ts, and only when the
-  // request actually needs it (never hard-coded, never logged).
-  FCI_IISFM_API_BASE_URL: z.string().url().default("https://api.iisfm.nic.in"),
-  FCI_IISFM_DEPOTS_ENDPOINT: z.string().default("/DepotsWithCap"),
 });
 
 const parsed = envSchema.safeParse(process.env);

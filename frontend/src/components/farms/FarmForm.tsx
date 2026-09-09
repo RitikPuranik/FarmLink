@@ -11,6 +11,7 @@ import { Label, FieldError, Alert } from "@/components/ui/primitives";
 import { useDistrictsQuery, useIrrigationTypesQuery, useStatesQuery, useTalukasQuery } from "@/hooks/useReferenceData";
 import { FarmFormValues, farmFormSchema } from "@/features/farms/farm.schemas";
 import { ApiRequestError } from "@/types/api";
+import { applyServerFieldErrors } from "@/lib/formErrors";
 
 // Surfaces *why* a dropdown is empty instead of failing silently. Without
 // this, a failed or not-yet-seeded reference-data call just leaves the
@@ -64,6 +65,7 @@ export function FarmForm({
     handleSubmit,
     watch,
     setValue,
+    setError,
     formState: { errors, isSubmitting },
   } = useForm<FarmFormValues>({
     resolver: zodResolver(farmFormSchema),
@@ -112,11 +114,18 @@ export function FarmForm({
     try {
       await onSubmit(values);
     } catch (err) {
-      if (err instanceof ApiRequestError && err.fields) {
-        setServerError(Object.values(err.fields)[0] ?? err.message);
-      } else {
-        setServerError(err instanceof ApiRequestError ? err.message : t("common.networkError"));
-      }
+      const message = applyServerFieldErrors(err, setError, [
+        "name",
+        "stateId",
+        "districtId",
+        "talukaId",
+        "village",
+        "pincode",
+        "area",
+        "areaUnit",
+        "irrigationType",
+      ] as const);
+      setServerError(message ?? (err instanceof ApiRequestError ? null : t("common.networkError")));
     }
   }
 

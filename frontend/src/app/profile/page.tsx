@@ -7,6 +7,7 @@ import { zodResolver } from "@hookform/resolvers/zod";
 import { ProtectedRoute } from "@/components/ProtectedRoute";
 import { AppShell } from "@/components/AppShell";
 import { useAuth } from "@/hooks/useAuth";
+import { useI18n } from "@/i18n/I18nProvider";
 import { PageHeader } from "@/components/ui/stat-card";
 import { Card, Label, FieldError, Alert } from "@/components/ui/primitives";
 import { Button } from "@/components/ui/button";
@@ -14,6 +15,7 @@ import { Input } from "@/components/ui/input";
 import { passwordSchema } from "@/features/auth/auth.schemas";
 import { authApi } from "@/services/authApi";
 import { ApiRequestError } from "@/types/api";
+import { applyServerFieldErrors } from "@/lib/formErrors";
 import { FarmerProfileSection } from "@/components/farmer-profile/FarmerProfileSection";
 
 const changePasswordSchema = z.object({
@@ -23,12 +25,14 @@ const changePasswordSchema = z.object({
 type ChangePasswordValues = z.infer<typeof changePasswordSchema>;
 
 function ChangePasswordForm() {
+  const { t } = useI18n();
   const [serverError, setServerError] = React.useState<string | null>(null);
   const [success, setSuccess] = React.useState(false);
   const {
     register,
     handleSubmit,
     reset,
+    setError,
     formState: { errors, isSubmitting },
   } = useForm<ChangePasswordValues>({ resolver: zodResolver(changePasswordSchema) });
 
@@ -40,11 +44,8 @@ function ChangePasswordForm() {
       setSuccess(true);
       reset();
     } catch (err) {
-      if (err instanceof ApiRequestError && err.fields) {
-        setServerError(Object.values(err.fields)[0] ?? err.message);
-      } else {
-        setServerError(err instanceof ApiRequestError ? err.message : "Something went wrong.");
-      }
+      const message = applyServerFieldErrors(err, setError, ["currentPassword", "newPassword"] as const);
+      setServerError(message ?? (err instanceof ApiRequestError ? null : t("common.somethingWrong")));
     }
   }
 
@@ -63,7 +64,7 @@ function ChangePasswordForm() {
             hasError={!!errors.currentPassword}
             {...register("currentPassword")}
           />
-          <FieldError>{errors.currentPassword?.message}</FieldError>
+          <FieldError>{errors.currentPassword && t(errors.currentPassword.message!)}</FieldError>
         </div>
         <div>
           <Label htmlFor="newPassword">New password</Label>
@@ -74,7 +75,7 @@ function ChangePasswordForm() {
             hasError={!!errors.newPassword}
             {...register("newPassword")}
           />
-          <FieldError>{errors.newPassword?.message}</FieldError>
+          <FieldError>{errors.newPassword && t(errors.newPassword.message!)}</FieldError>
         </div>
         <Button type="submit" isLoading={isSubmitting}>
           Update password

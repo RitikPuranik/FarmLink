@@ -10,11 +10,13 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Select } from "@/components/ui/select";
 import { EmptyState } from "@/components/EmptyState";
+import { FeatureTour } from "@/components/FeatureTour";
 import { useCropsQuery } from "@/hooks/useReferenceData";
 import { useAddFarmerCrop, useDeleteFarmerCrop, useUpdateFarmerCrop } from "@/hooks/useFarmerProfile";
 import { cropFormSchema, CropFormValues } from "@/features/farms/farm.schemas";
 import { Farm, FarmerCrop } from "@/types/farmer";
 import { ApiRequestError } from "@/types/api";
+import { applyServerFieldErrors } from "@/lib/formErrors";
 
 function localizedCropName(crop: FarmerCrop["crop"], language: "en" | "hi" | "mr") {
   if (language === "en") return crop.name;
@@ -103,6 +105,7 @@ function AddCropForm({ farms }: { farms: Farm[] }) {
     register,
     handleSubmit,
     reset,
+    setError,
     formState: { errors, isSubmitting },
   } = useForm<CropFormValues>({
     resolver: zodResolver(cropFormSchema),
@@ -123,11 +126,16 @@ function AddCropForm({ farms }: { farms: Farm[] }) {
       });
       reset({ farmId: farms.length === 1 ? farms[0].id : "", areaUnit: "ACRE" });
     } catch (err) {
-      if (err instanceof ApiRequestError && err.fields) {
-        setServerError(Object.values(err.fields)[0] ?? err.message);
-      } else {
-        setServerError(err instanceof ApiRequestError ? err.message : t("common.networkError"));
-      }
+      const message = applyServerFieldErrors(err, setError, [
+        "farmId",
+        "cropId",
+        "area",
+        "areaUnit",
+        "typicalYield",
+        "yieldUnit",
+        "isPrimary",
+      ] as const);
+      setServerError(message ?? (err instanceof ApiRequestError ? null : t("common.networkError")));
     }
   }
 
@@ -152,7 +160,7 @@ function AddCropForm({ farms }: { farms: Farm[] }) {
 
       <div>
         <Label htmlFor="crop-crop">{t("crop.select")}</Label>
-        <Select id="crop-crop" hasError={!!errors.cropId} {...register("cropId")}>
+        <Select id="crop-crop" data-tour="crop-select-field" hasError={!!errors.cropId} {...register("cropId")}>
           <option value="">{t("common.selectPlaceholder")}</option>
           {cropsQuery.data?.map((c) => (
             <option key={c.id} value={c.id}>
@@ -166,7 +174,7 @@ function AddCropForm({ farms }: { farms: Farm[] }) {
       <div className="grid gap-4 sm:grid-cols-2">
         <div>
           <Label htmlFor="crop-area">{t("crop.area")}</Label>
-          <Input id="crop-area" type="number" step="0.01" inputMode="decimal" hasError={!!errors.area} {...register("area")} />
+          <Input id="crop-area" data-tour="crop-area-field" type="number" step="0.01" inputMode="decimal" hasError={!!errors.area} {...register("area")} />
           <FieldError>{errors.area && t(errors.area.message!)}</FieldError>
         </div>
         <div>
@@ -189,7 +197,7 @@ function AddCropForm({ farms }: { farms: Farm[] }) {
         {t("crop.setAsPrimary")}
       </label>
 
-      <Button type="submit" isLoading={isSubmitting} className="w-auto px-4 py-2.5 text-sm">
+      <Button type="submit" data-tour="crop-submit-button" isLoading={isSubmitting} className="w-auto px-4 py-2.5 text-sm">
         {t("crop.add")}
       </Button>
     </form>
@@ -216,6 +224,27 @@ export function CropManager({ crops, farms }: { crops: FarmerCrop[]; farms: Farm
         </div>
       )}
       <AddCropForm farms={farms} />
+      <FeatureTour
+        tourId="add-crop"
+        enabled={crops.length === 0}
+        steps={[
+          {
+            target: "[data-tour='crop-select-field']",
+            title: "Choose the crop",
+            text: "Pick which crop you're growing on this farm. You can add more crops any time.",
+          },
+          {
+            target: "[data-tour='crop-area-field']",
+            title: "How much land",
+            text: "Enter how much of your farm this crop covers, in acres or hectares.",
+          },
+          {
+            target: "[data-tour='crop-submit-button']",
+            title: "Add it",
+            text: "Tap here to save. If you're growing more than one crop, mark your main one as primary.",
+          },
+        ]}
+      />
     </Card>
   );
 }

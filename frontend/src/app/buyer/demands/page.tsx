@@ -15,9 +15,11 @@ import { Button } from "@/components/ui/button";
 import { Badge, toneForStatus } from "@/components/ui/badge";
 import { LoadingBlock, ErrorBlock } from "@/components/StateBlocks";
 import { EmptyState } from "@/components/EmptyState";
+import { FeatureTour } from "@/components/FeatureTour";
 import { useCropsQuery, useStatesQuery, useDistrictsQuery } from "@/hooks/useReferenceData";
 import { demandApi } from "@/services/tradeApi";
 import { ApiRequestError } from "@/types/api";
+import { applyServerFieldErrors } from "@/lib/formErrors";
 
 const schema = z.object({
   cropId: z.string().min(1, "Select a crop."),
@@ -31,7 +33,7 @@ const schema = z.object({
 });
 type FormValues = z.infer<typeof schema>;
 
-function NewDemandForm({ onCreated }: { onCreated: () => void }) {
+function NewDemandForm({ onCreated, isFirstDemand }: { onCreated: () => void; isFirstDemand: boolean }) {
   const [open, setOpen] = React.useState(false);
   const [serverError, setServerError] = React.useState<string | null>(null);
   const cropsQuery = useCropsQuery();
@@ -40,6 +42,7 @@ function NewDemandForm({ onCreated }: { onCreated: () => void }) {
     handleSubmit,
     watch,
     reset,
+    setError,
     formState: { errors, isSubmitting },
   } = useForm<FormValues>({ resolver: zodResolver(schema), defaultValues: { quantityUnit: "QTL" } });
 
@@ -67,7 +70,19 @@ function NewDemandForm({ onCreated }: { onCreated: () => void }) {
       setOpen(false);
       onCreated();
     },
-    onError: (e) => setServerError(e instanceof ApiRequestError ? e.message : "Couldn't create this demand."),
+    onError: (e) => {
+      const message = applyServerFieldErrors(e, setError, [
+        "cropId",
+        "title",
+        "requiredQuantity",
+        "quantityUnit",
+        "targetPrice",
+        "stateId",
+        "districtId",
+        "description",
+      ] as const);
+      setServerError(message ?? (e instanceof ApiRequestError ? null : "Couldn't create this demand."));
+    },
   });
 
   if (!open) {
@@ -85,7 +100,7 @@ function NewDemandForm({ onCreated }: { onCreated: () => void }) {
       <form className="space-y-4" onSubmit={handleSubmit((v) => create.mutate(v))} noValidate>
         <div>
           <Label htmlFor="title">Title</Label>
-          <Input id="title" placeholder="e.g. Wheat for flour milling — Q3" hasError={!!errors.title} {...register("title")} />
+          <Input id="title" data-tour="demand-title-field" placeholder="e.g. Wheat for flour milling — Q3" hasError={!!errors.title} {...register("title")} />
           <FieldError>{errors.title?.message}</FieldError>
         </div>
 
@@ -105,7 +120,7 @@ function NewDemandForm({ onCreated }: { onCreated: () => void }) {
         <div className="grid grid-cols-3 gap-4">
           <div className="col-span-2">
             <Label htmlFor="requiredQuantity">Required quantity</Label>
-            <Input id="requiredQuantity" type="number" hasError={!!errors.requiredQuantity} {...register("requiredQuantity")} />
+            <Input id="requiredQuantity" data-tour="demand-quantity-field" type="number" hasError={!!errors.requiredQuantity} {...register("requiredQuantity")} />
             <FieldError>{errors.requiredQuantity?.message}</FieldError>
           </div>
           <div>
@@ -156,7 +171,7 @@ function NewDemandForm({ onCreated }: { onCreated: () => void }) {
         </div>
 
         <div className="flex gap-2">
-          <Button type="submit" className="w-auto px-4" isLoading={isSubmitting || create.isPending}>
+          <Button type="submit" data-tour="demand-submit-button" className="w-auto px-4" isLoading={isSubmitting || create.isPending}>
             Publish demand
           </Button>
           <Button type="button" variant="ghost" className="w-auto px-4" onClick={() => setOpen(false)}>
@@ -164,6 +179,27 @@ function NewDemandForm({ onCreated }: { onCreated: () => void }) {
           </Button>
         </div>
       </form>
+      <FeatureTour
+        tourId="post-demand"
+        enabled={isFirstDemand}
+        steps={[
+          {
+            target: "[data-tour='demand-title-field']",
+            title: "Describe what you need",
+            text: "A short, clear title helps farmers understand your demand at a glance.",
+          },
+          {
+            target: "[data-tour='demand-quantity-field']",
+            title: "How much you need",
+            text: "Enter the quantity you're looking for and pick the unit next to it.",
+          },
+          {
+            target: "[data-tour='demand-submit-button']",
+            title: "Publish it",
+            text: "Once published, farmers with a matching crop and location can see and respond to this demand.",
+          },
+        ]}
+      />
     </Card>
   );
 }
@@ -184,7 +220,12 @@ function DemandsContent() {
       <PageHeader
         title="My Demands"
         description="Tell farmers what you're looking for — quantity, price, and delivery location — and get matched automatically."
-        actions={<NewDemandForm onCreated={() => queryClient.invalidateQueries({ queryKey: ["buyer-demands"] })} />}
+        actions={
+          <NewDemandForm
+            onCreated={() => queryClient.invalidateQueries({ queryKey: ["buyer-demands"] })}
+            isFirstDemand={!demandsQuery.isLoading && (demandsQuery.data?.length ?? 0) === 0}
+          />
+        }
       />
 
       {actionError && <Alert variant="error" className="mb-4">{actionError}</Alert>}

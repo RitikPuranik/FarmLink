@@ -97,10 +97,8 @@ Onion/Soybean/Wheat so `GET /api/fpos/:fpoId/crop-aggregation` and
 
 | Command | What it does |
 |---|---|
-| `npm run dev` | Start `src/server.ts` with hot reload via `tsx` |
-| `npm start` | Start `src/server.ts` directly via `tsx` |
-| `npm run start:watch` | Start `src/server.ts` with nodemon and restart on source changes |
-| `npm run build` / `npm run start:prod` | Build to `dist` and run the production output |
+| `npm run dev` | Start with hot reload |
+| `npm run build` / `npm start` | Production build + run |
 | `npm test` | Full Jest suite (unit + integration, in-memory repos) |
 | `npm run test:unit` / `test:integration` | Just one half of the suite |
 | `npm run typecheck` | `tsc --noEmit` |

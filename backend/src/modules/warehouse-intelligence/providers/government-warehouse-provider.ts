@@ -2,24 +2,22 @@ import { env } from "../../../config/env";
 import { WarehouseDataProvider, WarehouseProviderRequest, WarehouseProviderResult } from "./warehouse-data-provider";
 
 /**
- * Boundary for a government warehouse data source with no real,
- * documented, integrable endpoint.
+ * Boundary for a future government warehouse data source (e.g. a WDRA
+ * registry, a state warehousing corporation feed, or similar).
  *
- * The GOVERNMENT provider slot in app.ts's WarehouseProviderRegistry is
- * now filled by FciIisfmWarehouseProvider (a real integration against
- * https://api.iisfm.nic.in/DepotsWithCap) plus the separate one-time
- * WDRA CSV importer (wdra-csv-import.ts) — so this class is no longer
- * registered there. It's kept as the honest-UNAVAILABLE template for a
- * *second* government source that genuinely has no integrable endpoint
- * yet (e.g. NABARD, explicitly out of scope for the FCI/WDRA work — see
- * docs/modules/module-09-warehouse-intelligence.md). Registering a second
- * instance of this class would need its own provider slot/id, since the
- * registry now has a real GOVERNMENT provider filling that role.
+ * No such API is configured, guessed at, or scraped here — there is no
+ * reliable, publicly documented government warehouse API this codebase can
+ * honestly claim to integrate with today. Rather than fabricate one,
+ * fetchWarehouses() always returns an explicit UNAVAILABLE result. This is
+ * intentionally NOT a system failure: WarehouseProviderRegistry treats
+ * UNAVAILABLE the same as "provider not enabled", never as an error to
+ * surface, retry, or alert on.
  *
- * fetchWarehouses() always returns an explicit UNAVAILABLE result rather
- * than fabricating data. This is intentionally NOT a system failure:
- * WarehouseProviderRegistry treats UNAVAILABLE the same as "provider not
- * enabled", never as an error to surface, retry, or alert on.
+ * WAREHOUSE_GOVERNMENT_PROVIDER_ENABLED/_TIMEOUT_MS/_MAX_RETRIES
+ * (config/env.ts) are already wired through so that the day a real
+ * endpoint exists, only this class's fetchWarehouses() body needs to
+ * change — the registry, config, and every downstream layer are already
+ * ready for it.
  */
 export class UnavailableGovernmentWarehouseProvider implements WarehouseDataProvider {
   readonly providerId = "government-unconfigured";

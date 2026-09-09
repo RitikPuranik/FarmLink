@@ -13,6 +13,7 @@ import { Label, FieldError, Alert } from "@/components/ui/primitives";
 import { ResetPasswordFormValues, resetPasswordFormSchema } from "@/features/auth/auth.schemas";
 import { authApi } from "@/services/authApi";
 import { ApiRequestError } from "@/types/api";
+import { applyServerFieldErrors } from "@/lib/formErrors";
 
 function ResetPasswordForm() {
   const { t } = useI18n();
@@ -23,6 +24,7 @@ function ResetPasswordForm() {
   const {
     register,
     handleSubmit,
+    setError,
     formState: { errors, isSubmitting },
   } = useForm<ResetPasswordFormValues>({
     resolver: zodResolver(resetPasswordFormSchema),
@@ -35,11 +37,8 @@ function ResetPasswordForm() {
       await authApi.resetPassword(values.token, values.newPassword);
       router.push("/login?reset=1");
     } catch (err) {
-      if (err instanceof ApiRequestError && err.fields) {
-        setServerError(Object.values(err.fields)[0] ?? err.message);
-      } else {
-        setServerError(err instanceof ApiRequestError ? err.message : t("common.networkError"));
-      }
+      const message = applyServerFieldErrors(err, setError, ["token", "newPassword"] as const);
+      setServerError(message ?? (err instanceof ApiRequestError ? null : t("common.networkError")));
     }
   }
 
