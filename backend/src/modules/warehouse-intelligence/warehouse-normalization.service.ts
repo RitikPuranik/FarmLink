@@ -1,4 +1,4 @@
-import { StorageType } from "@prisma/client";
+import { StorageType, WarehouseStatus } from "@prisma/client";
 import { QUANTITY_ALIASES, QuantityUnit as BaseQuantityUnit, convertQuantityToKg } from "../fpo/unit-conversion";
 import { ExternalWarehouseRecord, WarehouseProviderType } from "./providers/warehouse-data-provider";
 
@@ -53,6 +53,13 @@ export interface NormalizedWarehouseRecord {
   minTemperatureC: number | null;
   maxTemperatureC: number | null;
 
+  /** null means "the source didn't report a status for this record" —
+   * distinct from an explicit status the sync service should apply. Never
+   * defaulted to ACTIVE here; the sync service is the one place that
+   * decides what a null status means for a create vs. an update (see its
+   * own comment on this). */
+  status: WarehouseStatus | null;
+
   metadata: Record<string, unknown> | undefined;
   sourceUpdatedAt: Date | null;
 
@@ -105,6 +112,33 @@ function normalizeStorageType(hint: string | null | undefined): StorageType | nu
   const cleaned = cleanString(hint);
   if (!cleaned) return null;
   return STORAGE_TYPE_ALIASES[cleaned.toUpperCase()] ?? null;
+}
+
+/** Small, explicit set of forms only — mirrors STORAGE_TYPE_ALIASES'S own
+ * "case/whitespace variations handled safely, anything else treated
+ * exactly like absent" discipline. An unrecognized status string is
+ * dropped to `null` (never guessed as ACTIVE) with a warning, so a typo'd
+ * or unexpected source value never silently activates/deactivates a
+ * warehouse. */
+const STATUS_ALIASES: Record<string, WarehouseStatus> = {
+  ACTIVE: "ACTIVE",
+  INACTIVE: "INACTIVE",
+  SUSPENDED: "SUSPENDED",
+};
+
+function normalizeStatus(raw: string | null | undefined, warnings: NormalizationIssue[]): WarehouseStatus | null {
+  const cleaned = cleanString(raw);
+  if (!cleaned) return null;
+  const resolved = STATUS_ALIASES[cleaned.toUpperCase()];
+  if (!resolved) {
+    warnings.push({
+      field: "status",
+      code: "UNRECOGNIZED_STATUS",
+      message: `Status "${raw}" is not one of Active/Inactive/Suspended; the warehouse's existing/default status was left unchanged.`,
+    });
+    return null;
+  }
+  return resolved;
 }
 
 /** Resolves a free-text capacity unit against the exact same canonical
@@ -197,6 +231,7 @@ export function normalizeExternalWarehouseRecord(record: ExternalWarehouseRecord
     temperatureControlled: record.storage?.temperatureControlled ?? null,
     minTemperatureC: normalizeTemperature(record.storage?.minimumTemperature, "minimumTemperature", warnings),
     maxTemperatureC: normalizeTemperature(record.storage?.maximumTemperature, "maximumTemperature", warnings),
+    status: normalizeStatus(record.status, warnings),
     metadata: record.metadata,
     sourceUpdatedAt: record.sourceUpdatedAt ?? null,
     warnings,

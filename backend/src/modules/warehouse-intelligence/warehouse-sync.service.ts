@@ -48,6 +48,11 @@ export interface ProviderSyncSummary {
   skipped: number;
   /** Threw an unexpected error while normalizing/persisting. */
   failed: number;
+  /** Persisted (created/updated/linked) but with at least one non-fatal
+   * normalization/validation warning attached (PARTIAL level) — e.g. an
+   * unsupported capacity unit or an unrecognized status string. Distinct
+   * from `skipped`: these records were NOT dropped. */
+  warnings: number;
   errors?: string[];
 }
 
@@ -64,6 +69,7 @@ export interface WarehouseSyncSummary {
     duplicatesFlagged: number;
     skipped: number;
     failed: number;
+    warnings: number;
   };
 }
 
@@ -77,8 +83,9 @@ function sumTotals(providers: ProviderSyncSummary[]): WarehouseSyncSummary["tota
       duplicatesFlagged: acc.duplicatesFlagged + p.duplicatesFlagged,
       skipped: acc.skipped + p.skipped,
       failed: acc.failed + p.failed,
+      warnings: acc.warnings + p.warnings,
     }),
-    { fetched: 0, created: 0, updated: 0, linked: 0, duplicatesFlagged: 0, skipped: 0, failed: 0 },
+    { fetched: 0, created: 0, updated: 0, linked: 0, duplicatesFlagged: 0, skipped: 0, failed: 0, warnings: 0 },
   );
 }
 
@@ -134,6 +141,7 @@ export class WarehouseSyncService {
           duplicatesFlagged: 0,
           skipped: 0,
           failed: 0,
+          warnings: 0,
         });
         continue;
       }
@@ -156,6 +164,7 @@ export class WarehouseSyncService {
           duplicatesFlagged: 0,
           skipped: 0,
           failed: 0,
+          warnings: 0,
           errors: result.errors?.map((e) => `${e.code}: ${e.message}`),
         });
         continue;
@@ -205,6 +214,7 @@ export class WarehouseSyncService {
     let duplicatesFlagged = 0;
     let skipped = 0;
     let failed = 0;
+    let warnings = 0;
     const errors: string[] = [];
 
     for (const raw of records) {
@@ -220,6 +230,9 @@ export class WarehouseSyncService {
             errors: validation.errors.map((e) => e.code),
           });
           continue;
+        }
+        if (validation.level === "PARTIAL") {
+          warnings += 1;
         }
         if (validation.warnings.some((w) => w.code === "UNSUPPORTED_CAPACITY_UNIT" || w.code === "UNPARSEABLE_NUMBER")) {
           trackEvent("warehouse_record_normalization_failed", actorUserId ?? "system", {
@@ -258,6 +271,7 @@ export class WarehouseSyncService {
       duplicatesFlagged,
       skipped,
       failed,
+      warnings,
       errors: errors.length ? errors.slice(0, 50) : undefined,
     };
   }
@@ -292,6 +306,13 @@ export class WarehouseSyncService {
               pincode: record.location.pincode ?? warehouse.pincode,
               latitude: record.location.latitude ?? warehouse.latitude,
               longitude: record.location.longitude ?? warehouse.longitude,
+              // Same "only overwrite with what THIS fetch actually
+              // supplied" rule as every other field above: a source that
+              // reported no status this run leaves the warehouse's
+              // existing status/isActive untouched rather than resetting
+              // it to a default.
+              status: record.status ?? warehouse.status,
+              isActive: record.status ? record.status === "ACTIVE" : warehouse.isActive,
             },
           });
           await this.upsertSourceStorageUnit(tx, warehouse.id, record);
@@ -353,6 +374,12 @@ export class WarehouseSyncService {
           pincode: record.location.pincode,
           latitude: record.location.latitude,
           longitude: record.location.longitude,
+          // A source that reports no status at all falls back to the
+          // schema's own ACTIVE/isActive:true defaults (exactly what
+          // every other new Warehouse row already gets) — never a
+          // fabricated INACTIVE/SUSPENDED guess.
+          status: record.status ?? "ACTIVE",
+          isActive: record.status ? record.status === "ACTIVE" : true,
         },
       });
 

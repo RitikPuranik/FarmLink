@@ -13,6 +13,7 @@
     "prisma:seed": "tsx prisma/seed.ts",
     "market:import": "tsx src/modules/market-data/import-market-data.ts",
     "market-data:import": "tsx src/modules/market-data/import-market-data.ts",
+    "warehouse:import-wdra": "tsx src/modules/warehouse-intelligence/wdra-csv-import.ts",
     "test": "cross-env NODE_ENV=test jest --runInBand",
     "test:unit": "cross-env NODE_ENV=test jest --runInBand tests/unit",
     "test:integration": "cross-env NODE_ENV=test jest --runInBand tests/integration",
