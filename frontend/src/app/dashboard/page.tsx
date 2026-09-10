@@ -49,7 +49,7 @@ function DashboardContent(){
  const {user}=useAuth(); if(!user)return null;
  const profile=useFarmerProfileQuery();
  return <div>
-  <PageHeader title={`Good to see you, ${user.fullName.split(" ")[0]}.`} description="Here is your farm workspace. Start with what you need to do today." actions={<Link href="/lots/new" className="inline-flex items-center gap-2 rounded-xl bg-[#24221e] px-4 py-2.5 text-xs font-bold text-white shadow-sm"><Plus className="h-4 w-4"/> List produce</Link>}/>
+  <PageHeader title={<>Good to see you, <span translate="no">{user.fullName.split(" ")[0]}</span>.</>} description="Here is your farm workspace. Start with what you need to do today." actions={<Link href="/lots/new" className="inline-flex items-center gap-2 rounded-xl bg-[#24221e] px-4 py-2.5 text-xs font-bold text-white shadow-sm"><Plus className="h-4 w-4"/> List produce</Link>}/>
   {user.accountStatus === "PENDING_VERIFICATION" && <Alert variant="info" className="mb-5">Your account is pending verification. Some actions may stay limited until it is confirmed.</Alert>}
   <DashboardStats/>
   <div className="mt-6 grid gap-5 lg:grid-cols-[1.5fr_.8fr]">

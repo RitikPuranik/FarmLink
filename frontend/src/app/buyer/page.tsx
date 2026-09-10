@@ -78,7 +78,7 @@ function BuyerDashboardContent() {
 
   return (
     <div>
-      <PageHeader title={`Welcome back, ${user.fullName.split(" ")[0]}`} description="Manage your sourcing demand and trade offers." />
+      <PageHeader title={<>Welcome back, <span translate="no">{user.fullName.split(" ")[0]}</span></>} description="Manage your sourcing demand and trade offers." />
       <div className="mb-6">
         <BuyerStats />
       </div>

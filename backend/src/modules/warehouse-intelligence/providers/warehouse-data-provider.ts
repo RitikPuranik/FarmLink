@@ -75,16 +75,6 @@ export interface ExternalWarehouseRecord {
    * payload dump. */
   metadata?: Record<string, unknown>;
 
-  /** Free-text lifecycle status as the source wrote it (e.g. "Active",
-   * "inactive", "SUSPENDED") — resolved against a small explicit alias
-   * table in the normalization layer (STATUS_ALIASES), exactly the same
-   * "unrecognized text is dropped to null, never guessed" discipline as
-   * storage.storageType above. `undefined`/`null` means the source simply
-   * doesn't report a status for this record — the sync service then
-   * leaves Warehouse.status/isActive at their existing/default value
-   * rather than fabricating one. */
-  status?: string | null;
-
   sourceUpdatedAt?: Date | null;
 }
 

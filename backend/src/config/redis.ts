@@ -9,6 +9,18 @@ function createClient(url: string): Redis {
     maxRetriesPerRequest: 1,
     lazyConnect: true,
     retryStrategy: () => null, // don't hang a command retrying forever
+    // ioredis's own default here is 10_000ms. Four different cache modules
+    // (market-intelligence, buyer-matching, price-forecasting, warehouse-
+    // intelligence) block their request on `await redis.connect()` before
+    // falling back to "no cache" — so with the 10s default, every single
+    // click into Market / Forecasts / Warehouses (or any buyer-matching
+    // call) would hang for a full 10 seconds whenever Redis is merely
+    // *unreachable* (wrong host, paused cloud instance, firewalled network)
+    // rather than actively refusing the connection outright. A short
+    // timeout here means those code paths fail fast and fall back to an
+    // uncached (but instant) response instead, exactly as the "Redis is
+    // optional" comment below intends.
+    connectTimeout: 300,
   });
   client.on("error", (err) => {
     logger.warn({ err: err.message }, "Redis connection error — falling back to in-memory limits");

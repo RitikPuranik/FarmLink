@@ -8,6 +8,7 @@ import { useAuth } from "@/hooks/useAuth";
 import { NAV_BY_ROLE, ROLE_LABEL, type NavItem } from "@/components/nav/navConfig";
 import { cn } from "@/lib/utils";
 import { LogoMark } from "@/components/Logo";
+import { LanguageSwitcher } from "@/components/layout/LanguageSwitcher";
 import { OnboardingTour } from "@/components/OnboardingTour";
 
 function isActive(pathname: string, item: NavItem) {
@@ -48,7 +49,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
       <div><Brand /><div className="app-role"><span className="status-dot" /> {ROLE_LABEL[user.role]}</div></div>
       <nav className="app-nav" data-tour="nav">{navItems.map((item) => <NavLink key={item.href} item={item} />)}</nav>
       <div className="app-user">
-        <Link href="/profile" className="app-user-card"><span className="avatar">{initials}</span><span className="min-w-0"><b>{user.fullName}</b><small>{ROLE_LABEL[user.role]}</small></span><CircleUserRound className="ml-auto h-4 w-4 opacity-50" /></Link>
+        <Link href="/profile" className="app-user-card"><span className="avatar" translate="no">{initials}</span><span className="min-w-0"><b translate="no">{user.fullName}</b><small>{ROLE_LABEL[user.role]}</small></span><CircleUserRound className="ml-auto h-4 w-4 opacity-50" /></Link>
         <button className="app-logout" onClick={handleLogout} disabled={loggingOut}><LogOut className="h-4 w-4" /> {loggingOut ? "Signing out…" : "Sign out"}</button>
       </div>
     </aside>
@@ -57,7 +58,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
       <header className="app-topbar">
         <div className="mobile-only"><button className="icon-btn" onClick={() => setDrawerOpen(true)}><Menu /></button></div>
         <div className="topbar-search"><Search className="h-4 w-4" /><span>What do you need today?</span></div>
-        <div className="topbar-actions"><button className="icon-btn" aria-label="Notifications"><Bell /></button><Link href="/profile" className="top-user"><span className="avatar small">{initials}</span><span className="desktop-only"><b>{user.fullName.split(" ")[0]}</b><small>{ROLE_LABEL[user.role]}</small></span></Link></div>
+        <div className="topbar-actions"><LanguageSwitcher /><button className="icon-btn" aria-label="Notifications"><Bell /></button><Link href="/profile" className="top-user"><span className="avatar small" translate="no">{initials}</span><span className="desktop-only"><b translate="no">{user.fullName.split(" ")[0]}</b><small>{ROLE_LABEL[user.role]}</small></span></Link></div>
       </header>
       <main className="app-content" data-tour="dashboard-main">{children}</main>
     </div>

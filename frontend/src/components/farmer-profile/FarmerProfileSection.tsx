@@ -22,7 +22,7 @@ function PersonalInfoCard() {
       <dl className="grid grid-cols-1 gap-4 sm:grid-cols-2">
         <div>
           <dt className="text-sm text-muted-foreground">{t("farmerProfile.name")}</dt>
-          <dd className="font-medium">{user.fullName}</dd>
+          <dd className="font-medium" translate="no">{user.fullName}</dd>
         </div>
         <div>
           <dt className="text-sm text-muted-foreground">{t("farmerProfile.mobile")}</dt>

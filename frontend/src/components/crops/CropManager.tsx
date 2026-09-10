@@ -18,9 +18,16 @@ import { Farm, FarmerCrop } from "@/types/farmer";
 import { ApiRequestError } from "@/types/api";
 import { applyServerFieldErrors } from "@/lib/formErrors";
 
-function localizedCropName(crop: FarmerCrop["crop"], language: "en" | "hi" | "mr") {
+// Crop names can only be pre-translated in the languages the backend
+// stores (en/hi/mr today, via crop.translations). The UI's own language
+// switcher now supports arbitrary languages via live translation, but that
+// dynamic layer only covers app copy, not this domain data — so for any
+// other selected language we simply fall back to the English crop name
+// rather than guessing at an unavailable translation.
+function localizedCropName(crop: FarmerCrop["crop"], language: string) {
   if (language === "en") return crop.name;
-  return crop.translations[language] ?? crop.name;
+  const translations = crop.translations as Partial<Record<string, string>>;
+  return translations[language] ?? crop.name;
 }
 
 function CropRow({ crop, farms }: { crop: FarmerCrop; farms: Farm[] }) {
@@ -164,7 +171,7 @@ function AddCropForm({ farms }: { farms: Farm[] }) {
           <option value="">{t("common.selectPlaceholder")}</option>
           {cropsQuery.data?.map((c) => (
             <option key={c.id} value={c.id}>
-              {language === "en" ? c.name : c.translations[language] ?? c.name}
+              {localizedCropName(c, language)}
             </option>
           ))}
         </Select>

@@ -11,7 +11,7 @@ export function StatCard({ label, value, hint, icon, href, tone = "default", dat
   return href ? <Link href={href} className="block h-full">{content}</Link> : content;
 }
 
-export function PageHeader({ title, description, actions, breadcrumb }: { title: string; description?: string; actions?: React.ReactNode; breadcrumb?: React.ReactNode }) {
+export function PageHeader({ title, description, actions, breadcrumb }: { title: React.ReactNode; description?: string; actions?: React.ReactNode; breadcrumb?: React.ReactNode }) {
   return <div className="page-header"><div>{breadcrumb && <div className="breadcrumb">{breadcrumb}</div>}<h1>{title}</h1>{description && <p>{description}</p>}</div>{actions && <div className="page-actions">{actions}</div>}</div>;
 }
 
