@@ -53,6 +53,35 @@ const envSchema = z.object({
   // loop — mirrors MARKET_DATA_GOV_PAGE_SIZE's role of keeping a single
   // sync run from opening one unbounded transaction.
   WAREHOUSE_SYNC_BATCH_SIZE: z.coerce.number().int().min(1).max(500).default(100),
+
+  // Module 16 — Logistics Quote & Optimization. Every rate/weight below is
+  // a starting default for development/test only (Step 4/9: "DO NOT
+  // invent real-world Indian transport prices as permanent business
+  // truth" / "these are starting defaults only") — an operator is
+  // expected to tune them per deployment without a code change.
+  LOGISTICS_ROAD_DISTANCE_MULTIPLIER: z.coerce.number().positive().default(1.25),
+  LOGISTICS_AVERAGE_SPEED_KMPH: z.coerce.number().positive().default(35),
+
+  LOGISTICS_BASE_COST_INR: z.coerce.number().min(0).default(500),
+  LOGISTICS_RATE_PER_KM_INR: z.coerce.number().min(0).default(18),
+  LOGISTICS_MINIMUM_TRIP_COST_INR: z.coerce.number().min(0).default(800),
+  LOGISTICS_LOADING_COST_INR: z.coerce.number().min(0).default(200),
+  LOGISTICS_UNLOADING_COST_INR: z.coerce.number().min(0).default(200),
+  LOGISTICS_TOLL_ESTIMATE_PER_KM_INR: z.coerce.number().min(0).default(1.5),
+  LOGISTICS_REFRIGERATION_SURCHARGE_PERCENT: z.coerce.number().min(0).max(100).default(15),
+
+  // Optimization weights (Step 9) — must sum to 1 at the point of use;
+  // LogisticsOptimizationEngine normalizes rather than trusting the sum
+  // blindly (an operator could still misconfigure these).
+  LOGISTICS_WEIGHT_PRICE: z.coerce.number().min(0).max(1).default(0.4),
+  LOGISTICS_WEIGHT_DISTANCE: z.coerce.number().min(0).max(1).default(0.1),
+  LOGISTICS_WEIGHT_TIME: z.coerce.number().min(0).max(1).default(0.2),
+  LOGISTICS_WEIGHT_CAPACITY: z.coerce.number().min(0).max(1).default(0.15),
+  LOGISTICS_WEIGHT_RELIABILITY: z.coerce.number().min(0).max(1).default(0.15),
+
+  LOGISTICS_DEFAULT_QUOTE_VALIDITY_HOURS: z.coerce.number().int().positive().default(72),
+  LOGISTICS_ROUTE_CACHE_TTL_SECONDS: z.coerce.number().int().min(0).default(3600),
+  LOGISTICS_COST_CACHE_TTL_SECONDS: z.coerce.number().int().min(0).default(3600),
 });
 
 const parsed = envSchema.safeParse(process.env);

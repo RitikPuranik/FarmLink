@@ -117,6 +117,13 @@ const ALLOWED_EVENTS = new Set([
   "vehicle_registered",
   "vehicle_availability_updated",
   "vehicle_verified",
+  // Module 16 — Logistics Quote & Optimization
+  "logistics_request_created",
+  "logistics_estimate_calculated",
+  "logistics_optimization_completed",
+  "logistics_quote_submitted",
+  "logistics_quote_accepted",
+  "logistics_quote_rejected",
 ]);
 
 // Defense in depth: even if a caller accidentally passes a sensitive key in

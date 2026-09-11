@@ -112,6 +112,21 @@ import { VehicleService } from "./modules/transporters/vehicle.service";
 import { createTransporterRouter } from "./modules/transporters/transporter.routes";
 import { createVehicleRouter } from "./modules/transporters/vehicle.routes";
 import { createAdminTransporterRouter } from "./modules/transporters/admin-transporter.routes";
+import { PrismaLogisticsRequestRepository } from "./modules/logistics/logistics-request.repository";
+import { PrismaLogisticsQuoteRepository } from "./modules/logistics/logistics-quote.repository";
+import { LogisticsOptimizationResultRepository } from "./modules/logistics/logistics-optimization-result.repository";
+import { LogisticsVehicleDiscoveryRepository } from "./modules/logistics/logistics-vehicle-discovery.repository";
+import { LogisticsAuthorizationService } from "./modules/logistics/logistics.authorization";
+import { HaversineRouteDistanceProvider } from "./modules/logistics/route-distance.provider";
+import { LogisticsCostEstimator } from "./modules/logistics/logistics-cost-estimator";
+import { VehicleEligibilityService } from "./modules/logistics/vehicle-eligibility.service";
+import { DefaultProviderReliabilityService } from "./modules/logistics/provider-reliability.service";
+import { LogisticsOptimizationEngine } from "./modules/logistics/logistics-optimization.engine";
+import { getCostConfig, getRouteConfig } from "./modules/logistics/logistics.config";
+import { LogisticsRequestService } from "./modules/logistics/logistics-request.service";
+import { LogisticsQuoteService } from "./modules/logistics/logistics-quote.service";
+import { createLogisticsRequestRouter } from "./modules/logistics/logistics-request.routes";
+import { createLogisticsQuoteRouter } from "./modules/logistics/logistics-quote.routes";
 
 export interface AppDependencies {
   authRepository: AuthRepository;
@@ -569,6 +584,58 @@ export function createApp(deps: AppDependencies): Express {
     "/api/admin",
     createAdminTransporterRouter(transporterService, vehicleService, deps.authRepository, deps.auditService)
   );
+
+  // Module 16 — Logistics Quote & Optimization. Consumes Module 15's own
+  // transporterRepository/vehicleRepository/transporterAuthorizationService
+  // as-is (constructed just above) rather than duplicating them, and
+  // reuses this file's own already-constructed cropLotRepository/
+  // farmerProfileResolver/fpoAuthorization (see Module 4/3 wiring above)
+  // for lot ownership/FPO-authorization checks — see
+  // docs/modules/module-16-logistics-quote-optimization.md.
+  const logisticsRequestRepository = new PrismaLogisticsRequestRepository(deps.prisma);
+  const logisticsQuoteRepository = new PrismaLogisticsQuoteRepository(deps.prisma);
+  const logisticsOptimizationResultRepository = new LogisticsOptimizationResultRepository(deps.prisma);
+  const logisticsVehicleDiscoveryRepository = new LogisticsVehicleDiscoveryRepository(deps.prisma);
+  const logisticsAuthorization = new LogisticsAuthorizationService(fpoAuthorization);
+  const routeConfig = getRouteConfig();
+  const routeDistanceProvider = new HaversineRouteDistanceProvider(routeConfig);
+  const logisticsCostEstimator = new LogisticsCostEstimator(getCostConfig());
+  const vehicleEligibilityService = new VehicleEligibilityService();
+  const providerReliabilityService = new DefaultProviderReliabilityService();
+  const logisticsOptimizationEngine = new LogisticsOptimizationEngine();
+
+  const logisticsRequestService = new LogisticsRequestService(
+    logisticsRequestRepository,
+    logisticsQuoteRepository,
+    deps.cropLotRepository,
+    farmerProfileResolver,
+    logisticsAuthorization,
+    routeDistanceProvider,
+    logisticsCostEstimator,
+    logisticsVehicleDiscoveryRepository,
+    vehicleEligibilityService,
+    vehicleRepository,
+    transporterRepository,
+    providerReliabilityService,
+    logisticsOptimizationEngine,
+    logisticsOptimizationResultRepository,
+    deps.auditService
+  );
+  const logisticsQuoteService = new LogisticsQuoteService(
+    logisticsQuoteRepository,
+    logisticsRequestRepository,
+    deps.cropLotRepository,
+    farmerProfileResolver,
+    logisticsAuthorization,
+    transporterAuthorizationService,
+    transporterRepository,
+    vehicleRepository,
+    vehicleEligibilityService,
+    deps.auditService
+  );
+
+  app.use("/api", createLogisticsRequestRouter(logisticsRequestService, deps.authRepository, deps.auditService));
+  app.use("/api", createLogisticsQuoteRouter(logisticsQuoteService, deps.authRepository, deps.auditService));
 
   app.use(notFoundHandler);
   app.use(errorHandler);

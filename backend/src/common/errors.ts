@@ -99,6 +99,24 @@ export type ErrorCode =
   | "INVALID_SERVICE_AREA"
   | "TRANSPORTER_NOT_VERIFIED"
   | "UNAUTHORIZED_TRANSPORTER_ACCESS"
+  // Module 16 — Logistics Quote & Optimization. LOGISTICS_REQUEST_NOT_FOUND
+  // and LOGISTICS_QUOTE_NOT_FOUND are thrown via the generic NotFoundError
+  // (same convention Module 14/15 use), same reasoning as those modules'
+  // own comments. The remaining codes below are genuine business-rule
+  // violations thrown via LogisticsDomainError.
+  | "INVALID_LOGISTICS_REQUEST"
+  | "LOGISTICS_REQUEST_NOT_OPEN"
+  | "LOGISTICS_REQUEST_ALREADY_CANCELLED"
+  | "NO_ELIGIBLE_VEHICLE"
+  | "VEHICLE_NOT_ELIGIBLE"
+  | "VEHICLE_OWNERSHIP_MISMATCH"
+  | "TRANSPORTER_NOT_ELIGIBLE"
+  | "INVALID_QUOTE_TRANSITION"
+  | "QUOTE_EXPIRED"
+  | "QUOTE_ALREADY_DECIDED"
+  | "QUOTE_ALREADY_ACCEPTED_FOR_REQUEST"
+  | "UNAUTHORIZED_QUOTE_ACCESS"
+  | "NO_QUOTES_TO_OPTIMIZE"
   | "UNEXPECTED_ERROR";
 
 export class AppError extends Error {
@@ -264,6 +282,40 @@ export class TransporterDomainError extends AppError {
       | "INVALID_SERVICE_AREA"
       | "TRANSPORTER_NOT_VERIFIED"
       | "UNAUTHORIZED_TRANSPORTER_ACCESS"
+    >,
+    statusCode = 422,
+  ) {
+    super(message, statusCode, code);
+  }
+}
+
+/**
+ * Module 16's equivalent of TransporterDomainError/NetRealizationDomainError.
+ * LOGISTICS_REQUEST_NOT_FOUND/LOGISTICS_QUOTE_NOT_FOUND are NOT included
+ * here — those are thrown via the generic NotFoundError (same convention
+ * as every module above). UNAUTHORIZED_QUOTE_ACCESS/VEHICLE_OWNERSHIP_MISMATCH
+ * default to 403 explicitly at the call site; every other code here is a
+ * 422 business-rule violation (invalid transition, expired quote, no
+ * eligible vehicle, etc.) unless the call site overrides statusCode.
+ */
+export class LogisticsDomainError extends AppError {
+  constructor(
+    message: string,
+    code: Extract<
+      ErrorCode,
+      | "INVALID_LOGISTICS_REQUEST"
+      | "LOGISTICS_REQUEST_NOT_OPEN"
+      | "LOGISTICS_REQUEST_ALREADY_CANCELLED"
+      | "NO_ELIGIBLE_VEHICLE"
+      | "VEHICLE_NOT_ELIGIBLE"
+      | "VEHICLE_OWNERSHIP_MISMATCH"
+      | "TRANSPORTER_NOT_ELIGIBLE"
+      | "INVALID_QUOTE_TRANSITION"
+      | "QUOTE_EXPIRED"
+      | "QUOTE_ALREADY_DECIDED"
+      | "QUOTE_ALREADY_ACCEPTED_FOR_REQUEST"
+      | "UNAUTHORIZED_QUOTE_ACCESS"
+      | "NO_QUOTES_TO_OPTIMIZE"
     >,
     statusCode = 422,
   ) {

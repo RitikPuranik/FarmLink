@@ -273,6 +273,13 @@ model User {
   // Module 1 field/relation changes.
   transporterProfile TransporterProfile?
 
+  // Module 16 — every logistics request this user personally raised
+  // (FARMER/FPO_ADMIN/ADMIN — see logistics.authorization.ts). Restrict:
+  // a historical logistics request must never disappear out from under
+  // a deleted/deactivated user, same reasoning as every other Restrict
+  // relation on this model.
+  logisticsRequestsRaised LogisticsRequest[]
+
   @@index([mobile])
   @@index([email])
   @@index([publicId])
@@ -527,6 +534,9 @@ model Crop {
   name     String  @unique
   category String?
   active   Boolean @default(true)
+  // Module 16 — additive back-relation only (LogisticsRequest.cropId
+  // mirrors CropLot.cropId's own reuse of this model).
+  logisticsRequests LogisticsRequest[]
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -935,6 +945,12 @@ model CropLot {
   // lot. Restrict, matching sellStoreDecisions/storageReservations above:
   // a lot must never disappear out from under a historical calculation.
   netRealizationCalculations NetRealizationCalculation[]
+
+  // Module 16 — every logistics (transport quote) request ever raised
+  // against this lot. Restrict is enforced at the LogisticsRequest side
+  // (never Cascade), matching every other historical-transaction relation
+  // on this model above.
+  logisticsRequests LogisticsRequest[]
 
   @@index([farmerId, status])
   @@index([fpoId, status])
@@ -2502,6 +2518,10 @@ model TransporterProfile {
   user         User                      @relation(fields: [userId], references: [id], onDelete: Cascade)
   vehicles     Vehicle[]
   serviceAreas TransporterServiceArea[]
+  // Module 16 — Logistics Quote & Optimization. Additive back-relation
+  // only (Prisma requires both sides of an explicit relation); nothing
+  // about Module 15's own profile/vehicle/service-area behavior changes.
+  logisticsQuotes LogisticsQuote[]
 
   @@index([verificationStatus])
   @@index([isActive])
@@ -2550,6 +2570,9 @@ model Vehicle {
 
   transporter TransporterProfile @relation(fields: [transporterId], references: [id], onDelete: Cascade)
   driver      VehicleDriver?
+  // Module 16 — additive back-relation only, same reasoning as
+  // TransporterProfile.logisticsQuotes above.
+  logisticsQuotes LogisticsQuote[]
 
   @@index([transporterId])
   @@index([vehicleType])
@@ -2610,4 +2633,219 @@ model VehicleDriver {
 
   @@index([transporterId])
   @@map("vehicle_drivers")
+}
+
+// ---------------------------------------------------------------------------
+// Module 16 — Logistics Quote & Optimization
+//
+// Consumes Module 15 (TransporterProfile/Vehicle) as-is — no duplicate
+// transport/provider/vehicle models are introduced here. A LogisticsRequest
+// hangs off the existing CropLot (there is no separate "Order" model in
+// this codebase — see Step 1 of the build spec: reuse exact existing
+// names). Three concerns are kept as three separate models rather than
+// folded together, mirroring every other module's own "one row per
+// distinct fact" convention:
+//   - LogisticsRequest: the transport requirement itself (one per lot per
+//     transport need), plus FarmLink's own best-effort estimate.
+//   - LogisticsQuote: a transport provider's own submitted number for a
+//     specific request — deliberately never merged with the estimate
+//     above, so "what FarmLink guessed" and "what a provider actually
+//     offered" and "what was finally accepted" always stay three distinct,
+//     independently-inspectable values (build spec Step 10).
+//   - LogisticsOptimizationResult: one immutable row per optimize() run,
+//     kept for audit/explainability rather than overwritten in place.
+// ---------------------------------------------------------------------------
+
+// Deliberately minimal (Step 24: do not overengineer). OPEN covers
+// "created, awaiting/estimating/collecting quotes" as one state — there is
+// no separate DRAFT for the request itself (unlike LogisticsQuote below)
+// because build spec Step 12 expects estimate() to be callable immediately
+// after creation, with no separate publish step.
+enum LogisticsRequestStatus {
+  OPEN
+  QUOTE_ACCEPTED
+  CANCELLED
+}
+
+// Exactly the state machine in build spec Step 8. DRAFT exists for
+// forward-compatibility with a future "save as draft before submitting"
+// flow but is not reachable through the current API — POST creates a
+// quote directly in SUBMITTED (see logistics-quote.service.ts's own
+// comment) — so DRAFT -> SUBMITTED never actually fires today; it is kept
+// in the enum/state machine rather than omitted so adding that flow later
+// never requires a migration.
+enum LogisticsQuoteStatus {
+  DRAFT
+  SUBMITTED
+  EXPIRED
+  WITHDRAWN
+  ACCEPTED
+  REJECTED
+}
+
+// A transport requirement for one lot. Pickup/destination are stored
+// directly on this row (Step 3's minimal location model) rather than
+// joined from CropLot/BuyerDemand — CropLot has no lat/lng today, and a
+// logistics request must remain meaningful even for a buyer/destination
+// that exists outside this codebase's own buyer-matching flow. This is a
+// deliberate decoupling, not a duplication: originDistrict/originState
+// already live on CropLot as the lot's origin snapshot (build spec
+// section 17/18/55 in Module 4) — pickup* here is the *transport* origin
+// for this specific request, which the requester may confirm or override
+// (e.g. a different loading point than the farm's registered village).
+model LogisticsRequest {
+  id       String @id @default(uuid())
+  publicId String @unique @default(uuid())
+
+  lotId           String
+  requesterUserId String
+
+  cropId String
+
+  // Canonical KG value, same convention as CropLot.quantityKg /
+  // Vehicle.capacityKg — `quantityUnit` is only the unit the requester
+  // declared/display unit, never re-derived arithmetic.
+  requiredQuantityKg Decimal      @db.Decimal(14, 2)
+  quantityUnit       QuantityUnit @default(KG)
+
+  pickupAddress   String?
+  pickupVillage   String?
+  pickupDistrict  String
+  pickupState     String
+  pickupPincode   String?
+  pickupLatitude  Float?
+  pickupLongitude Float?
+
+  destinationAddress   String?
+  destinationDistrict  String
+  destinationState     String
+  destinationPincode   String?
+  destinationLatitude  Float?
+  destinationLongitude Float?
+
+  requestedPickupAt DateTime?
+  deliveryDeadline  DateTime?
+
+  // Reuses Module 15's own VehicleCapability enum (Step 5/15: "required
+  // special handling is supported") instead of inventing a parallel one.
+  // isRefrigerated mirrors Vehicle.isRefrigerated's own dedicated boolean
+  // for the same "by far the most common filter" reasoning noted there.
+  requiredCapabilities  VehicleCapability[] @default([])
+  requiresRefrigeration Boolean             @default(false)
+  specialInstructions   String?
+
+  status LogisticsRequestStatus @default(OPEN)
+
+  // Step 12 — FarmLink's own best-effort estimate, calculated by
+  // LogisticsCostEstimator/HaversineRouteDistanceProvider. Always kept
+  // distinct from any LogisticsQuote.quotedAmount (Step 10).
+  estimatedDistanceKm      Decimal? @db.Decimal(10, 2)
+  estimatedDurationMinutes Int?
+  estimatedCost            Decimal? @db.Decimal(12, 2)
+  estimatedCostCurrency    String   @default("INR")
+  estimateCalculatedAt     DateTime?
+
+  // Set only by the optimization engine (Step 9) / acceptance flow
+  // (Step 11) respectively — never accepted from the client (Step 15).
+  recommendedQuoteId String? @unique
+  acceptedQuoteId    String? @unique
+
+  cancelledAt DateTime?
+  cancelReason String?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  lot       CropLot @relation(fields: [lotId], references: [id], onDelete: Restrict)
+  crop      Crop    @relation(fields: [cropId], references: [id], onDelete: Restrict)
+  requester User    @relation(fields: [requesterUserId], references: [id], onDelete: Restrict)
+
+  quotes            LogisticsQuote[]               @relation("RequestQuotes")
+  acceptedQuote      LogisticsQuote?                @relation("AcceptedQuote", fields: [acceptedQuoteId], references: [id])
+  recommendedQuote   LogisticsQuote?                @relation("RecommendedQuote", fields: [recommendedQuoteId], references: [id])
+  optimizationResults LogisticsOptimizationResult[]
+
+  @@index([requesterUserId, status])
+  @@index([lotId])
+  @@index([status])
+  @@index([createdAt])
+  @@map("logistics_requests")
+}
+
+// A transport provider's own submitted number against one
+// LogisticsRequest, for one of their own Vehicles. Ownership of both
+// transportProviderId and vehicleId is re-validated server-side on every
+// write (Step 7/15) — never trusted from the request body.
+model LogisticsQuote {
+  id       String @id @default(uuid())
+  publicId String @unique @default(uuid())
+
+  logisticsRequestId  String
+  transportProviderId String
+  vehicleId           String
+
+  quotedAmount Decimal @db.Decimal(12, 2)
+  currency     String  @default("INR")
+
+  estimatedPickupTime      DateTime?
+  estimatedDeliveryTime    DateTime?
+  estimatedDistanceKm      Decimal? @db.Decimal(10, 2)
+  estimatedDurationMinutes Int?
+
+  notes String?
+
+  status     LogisticsQuoteStatus @default(SUBMITTED)
+  validUntil DateTime?
+
+  submittedAt DateTime?
+  acceptedAt  DateTime?
+  rejectedAt  DateTime?
+  withdrawnAt DateTime?
+  expiredAt   DateTime?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  request            LogisticsRequest  @relation("RequestQuotes", fields: [logisticsRequestId], references: [id], onDelete: Cascade)
+  transportProvider  TransporterProfile @relation(fields: [transportProviderId], references: [id], onDelete: Restrict)
+  vehicle            Vehicle            @relation(fields: [vehicleId], references: [id], onDelete: Restrict)
+
+  // Back-relations for LogisticsRequest.acceptedQuoteId/recommendedQuoteId
+  // above — singular (not `[]`) because those FK columns are @unique, so
+  // at most one LogisticsRequest can ever point at a given quote as its
+  // accepted/recommended choice.
+  acceptedForRequest    LogisticsRequest?
+  recommendedForRequest LogisticsRequest?
+
+  @@index([logisticsRequestId, status])
+  @@index([transportProviderId, status])
+  @@index([vehicleId])
+  @@index([status, validUntil])
+  @@map("logistics_quotes")
+}
+
+// One immutable row per optimize() run (Step 9/13) — never overwritten in
+// place, so a later recalculation never erases the explanation behind an
+// earlier recommendation that a farmer may have already acted on.
+model LogisticsOptimizationResult {
+  id String @id @default(uuid())
+
+  logisticsRequestId String
+  recommendedQuoteId String?
+  algorithmVersion   String
+  calculatedAt       DateTime @default(now())
+
+  // { priceWeight, distanceWeight, timeWeight, capacityWeight, reliabilityWeight }
+  weights Json
+  // Array of { quoteId, rank, score, componentScores, reasons } — the full
+  // ranked list, not just the winner (Step 13: "Do not hide the ranking
+  // logic").
+  rankings Json
+
+  createdAt DateTime @default(now())
+
+  request LogisticsRequest @relation(fields: [logisticsRequestId], references: [id], onDelete: Cascade)
+
+  @@index([logisticsRequestId, calculatedAt])
+  @@map("logistics_optimization_results")
 }
